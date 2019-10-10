@@ -74,26 +74,27 @@ class Individual (object):
             #for r =3.5, the loop will run 2 times in 50% of cases, 3 times in the other 50%
             # = adult + 2.5 offspring
                        
-            #add random mutation - mutations of large effects!
-            new_b = self.b if random.uniform(0,1) > mut_frac else random.gauss(self.b,0.2)
+            #add random mutation
+            new_b = self.b if random.uniform(0,1) > mut_frac else random.gauss(self.b,0.1)
             if new_b > 10:
                 new_b = 10 #very large slopes cause math.range error in .var_comps()
                 #if b*e > 710 => math.exp(710)
-            new_c = self.c if random.uniform(0,1) > mut_frac else random.uniform(0,1)
-            new_d = self.d if random.uniform(0,1) > mut_frac else random.uniform(new_c,1)
-            new_e = self.e if random.uniform(0,1) > mut_frac else random.gauss(self.e,0.2)
+            new_c = self.c if random.uniform(0,1) > mut_frac else random.gauss(self.c,0.1)
+            new_d = self.d if random.uniform(0,1) > mut_frac else random.gauss(self.d,0.1)     
+            new_e = self.e if random.uniform(0,1) > mut_frac else random.gauss(self.e,0.1)
+            if new_c < 0:
+                new_c = 0
+            if new_c > 1:
+                new_c = 1
+            if new_d < new_c: #prevents upper bound from being smaller than lower bound
+                new_d = new_c
+            if new_d > 1:
+                new_d = 1  
             return_list.append(Individual(new_b, new_c, new_d, new_e))
             #alternative c/d mutation: 
-            #new_c = self.c if random.uniform(0,1) > mut_frac else random.gauss(self.c,0.1)
-            #new_d = self.d if random.uniform(0,1) > mut_frac else random.gauss(self.d,0.1)
-            #if new_c < 0:
-            #    new_c = 0
-            #if new_c > 1:
-            #    new_c = 1
-            #if new_d < new_c: #prevents upper bound from being smaller than lower bound
-            #    new_d = new_c
-            #if new_d > 1:
-            #    new_d = 1     
+            #new_c = self.c if random.uniform(0,1) > mut_frac else random.uniform(0,1)
+            #new_d = self.d if random.uniform(0,1) > mut_frac else random.uniform(new_c,1)
+               
         return (return_list)
     
     def check_diap (self, t_int):
@@ -278,32 +279,7 @@ test2.plot(length = years2)
 test2.get_results(output = "among")
 test2.plot(to_plot= "among_list", length = years2)
 
-'''
-'''
- #mu = mu_float + climate_rate * i
-        #---or----
-        #if i > max_year/2:
-            #mu = mu_float + climate_jump
-            
-        #y_list.append(Year(mu, sigma_float, popsize, eggs = y_list[i-1].diapause_list))
-        
-       # y_list.append(Year(mu_float, sigma_float, popsize, eggs = y_list[i-1].diapause_list))
-        #diapausing eggs of last year become new year's population (and will be 
-        #reduced to popsize at year initialization))
-        
-'''      
-y_list_bh = run_program(sigma_float = 3, max_year = 100)
-print("bh done.\n\n")
-res_bh = get_results(y_list_bh)
-plot_details(res_bh,sig = 6)
 
-y_list_p = run_program(sigma_float = 0)
-print("plasticity done.\n\n")
-res_p = get_results(y_list_p)
-plot_details(res_p, sig=0)
-summ = get_summary(y_list_bh)
-plot_summary(summ)
-'''
 
 '''
 todo: add a change of means with time. 
@@ -323,10 +299,15 @@ todo: add a change of means with time.
 ==>assimilation: evolution of bet-hedging ensures some flat slopes, these will then evovle back to high plasticity
 
 
-#results_list_bh = get_summary(y_list_bh)
-#plot_summary(results_list)
-plt.plot(x_list, b, label = "b" )
-plt.plot(x_list, c, label = "c" )
-plt.plot(x_list, d, label = "d" )
-plt.plot(x_list, e, label = "e" )
-'''
+
+''' 
+ #mu = mu_float + climate_rate * i
+        #---or----
+        #if i > max_year/2:
+            #mu = mu_float + climate_jump
+            
+        #y_list.append(Year(mu, sigma_float, popsize, eggs = y_list[i-1].diapause_list))
+        
+       # y_list.append(Year(mu_float, sigma_float, popsize, eggs = y_list[i-1].diapause_list))
+        #diapausing eggs of last year become new year's population (and will be 
+        #reduced to popsize at year initialization)) 
