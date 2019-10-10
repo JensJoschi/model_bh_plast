@@ -42,16 +42,6 @@ import numpy
 import math
 import matplotlib.pyplot as plt
 
-''' model constants'''
-#added here empty to prevent errors; will be properly intialized under 'main program'
-growth_rate = 0
-popsize = 0
-mut_rate=0
-mu_float = 0
-sigma_float = 0
-max_year = 0
-
-
 '''classes'''
 class Individual (object):
     '''creates individual with 4 reaction norm properties and diapause switch.
@@ -86,6 +76,9 @@ class Individual (object):
                        
             #add random mutation - mutations of large effects!
             new_b = self.b if random.uniform(0,1) > mut_frac else random.gauss(self.b,0.2)
+            if new_b > 10:
+                new_b = 10 #very large slopes cause math.range error in .var_comps()
+                #if b*e > 710 => math.exp(710)
             new_c = self.c if random.uniform(0,1) > mut_frac else random.uniform(0,1)
             new_d = self.d if random.uniform(0,1) > mut_frac else random.uniform(new_c,1)
             new_e = self.e if random.uniform(0,1) > mut_frac else random.gauss(self.e,0.2)
@@ -109,26 +102,23 @@ class Individual (object):
         diap = bool(numpy.random.binomial(1,diap_probability))
         return(diap)
         
-    def var_among(self):
-        ''' calculate variance among environments (plasticity)'''
-        percs =[]
+    def var_comps(self):
+        ''' calculate variance among environments (plasticity)
+        
+        var_within = sum p*(1-p) / n
+        var_among = sd^2 / n'''
+        
+        probability = []
+        p2 = []
         for t in range(50):
             upper = (self.d-self.c) #=upper part of diap_probability equation
             lower = 1 + math.exp(-1*self.b* (t-self.e)) #lower part
-            percs.append(round(self.c + (upper/lower), 4))#note constant c
+            prob = round(self.c + (upper/lower), 4)
+            probability.append(prob)#note constant c
+            p2.append(prob * (1-prob))
             #rounding included for numerical stability; sd(10^-130,10^-15, 0.2) etc
-        return(numpy.std(percs,ddof=1))
-        
-    def var_within(self):
-        percs= []
-        for t in range(50):
-            upper = (self.d-self.c)
-            lower = 1 + math.exp(-1*self.b* (t-self.e)) 
-            val = round(self.c + (upper/lower), 4)
-            percs.append(round(val *  (1-val),4))
-        return(numpy.mean(val))
-        
-    
+        self.among = numpy.std(probability, ddof=1)
+        self.within = numpy.mean(p2)    
           
     
 class Year(object):
@@ -169,44 +159,53 @@ class Year(object):
         
         for t in range(self.t_on):
             self.runday(growth_rate, mut_rate, t)
+        #now that winter has arrived, self.awake_list could be discarded.
+        #only self.diapause_list remains important
+        #print ("survivors: ", len(self.diapause_list))
+
+
+
+            
     
 
-'''main program'''
-growth_rate = 1.2
-popsize = 250
-mut_rate = 0.3 * 1/popsize #mutation rate
-mu_float = 20
-sigma_float = 0
-max_year = 2000
-climate_rate = 0
- 
 class Run_Program(object):
-    '''docstring'''
-    def __init__ (self, growth_rate = 1.2, popsize = 250, mut_rate = 1/popsize,
-                mu_float = 20, sigma_float = 1, max_year = 2000):
+    '''run the model'''
+    def __init__ (self, growth_rate = 1.2, popsize = 250, mut_rate = 1/250,
+                mu_float = 20, sigma_float = 1, max_year = 2000, model_name = "generic"):
+        '''saves parameters and creates starting population'''
         self.growth_rate = growth_rate
         self.popsize = popsize
         self.mut_rate = mut_rate
         self.mu_float = mu_float
         self.sigma_float = sigma_float
         self.max_year = max_year
+        self.model_name = model_name
+        
+        self.t_on_list = [] #stores winter onsets of each year
+        self.surv_list = [] #stores no. survivors of each year
+        self.y_list = []    #stores Year instances
         
         pop_list = []
+        
         for i in range(self.popsize):
-            pop_list.append(Individual(0.5,0,1,20))
-        init = Year(self.mu_float, self.sigma_float, self.popsize, self.pop_list)
+            b = random.gauss(1,0.5)
+            c = random.uniform(0,0.5)
+            d= random.uniform(0.5,1)
+            e = random.gauss(self.mu_float,self.sigma_float * 2)
+            pop_list.append(Individual(b,c,d,e))
+        init = Year(self.mu_float, self.sigma_float, self.popsize, pop_list)
         init.diapause_list = init.awake_list
-        self.y_list = []
         self.y_list.append(init)
         
     def __str__(self):
-        return("PARAMETERS:\nr:{}N:{}mutrate:{}\nmu:{}sigma:{}end:{}".format(
+        return("PARAMETERS:\nr:{}N:{}mutrate:{}\n mu:{}sigma:{}end:{}".format(
                 self.growth_rate, self.popsize,self.mut_rate,
                 self.mu_float, self.sigma_float, self.max_year))
         
     def run(self):
         print ("Running")
-        for i in range(1, self.max_year):        
+        yc = 1
+        for i in range(1, self.max_year): 
             self.y_list.append(Year(self.mu_float, self.sigma_float, self.popsize, 
                                     eggs = self.y_list[i-1].diapause_list))
             #diapausing eggs of last year become new year's population (and will be 
@@ -215,113 +214,90 @@ class Run_Program(object):
                 print ("population extinct!")
                 break
             self.y_list[i].runyear(self.growth_rate, self.mut_rate)
-            print(".", end = '')
+            yc +=1
+            if not yc % 10: #if yc % 10 == 0
+                print(".", end = '')
+        self.y_list.pop(0)
+        yc -= 1
+        return(yc)
     
     def get_summary(self):
         '''provide winter onsets and #survivors'''
-        #reaction_norms = [[],[],[],[],[],[]]
-        self.t_on_list = []
-        self.surv_list = []
         for year in self.y_list:
             self.t_on_list.append(year.t_on)
-            self.surv_list.append(year.diapause_list)
+            self.surv_list.append(len(year.diapause_list))
+        
 
-def run_program(growth_rate = growth_rate, popsize = popsize, mut_rate = mut_rate,
-                mu_float= mu_float, sigma_float = sigma_float, max_year = max_year):
-    #initialize:
-    pop_list =[]
-    for i in range(popsize):
-        pop_list.append(Individual(0.5,0,1,20))
-    init = Year(mu_float, sigma_float, popsize, pop_list)
-    init.diapause_list = init.awake_list
-    y_list = []
-    y_list.append(init)
+    def get_results(self, output = "b"):
+        '''provide population level summary of reaction norm shape
     
-    print ("running.")
-    for i in range(1, max_year):
-        #mu = mu_float + climate_rate * i
+        input: "b", "c", "d", "e", "among" or "within". any other input throws error'''
+        result = []
+        yc = 0
+        for year in self.y_list:  
+            yc += 1
+            if not yc % 10:
+                print("-",end="")
+            ind_list = []
+        
+            for individual in year.diapause_list:  
+                ind_list.append(individual.__dict__[output])
+            result.append(numpy.mean(ind_list))
+        self.__dict__[output+"_list"] = result
+        return(result)
+            
+        
+    def plot (self, to_plot = "surv_list", length =0):
+        '''docstring'''
+        x_list = [i for i in range(length)]
+        plt.plot(x_list, self.__dict__[to_plot], label = to_plot)
+        plt.title(self.model_name)
+        plt.legend()
+        plt.show()
+        
+    def var_comps(self):
+        for year in self.y_list:
+            for individual in year.diapause_list:
+                individual.var_comps()
+
+test = Run_Program(growth_rate= 1.1, sigma_float = 0, max_year = 1000, model_name = "evolving plasticity")
+years = test.run() 
+test.var_comps()
+test.get_summary()
+test.plot(length = years)
+test.get_results(output = "among")
+test.plot(to_plot= "among_list", length = years)
+
+
+
+test2 = Run_Program(growth_rate= 1.1, sigma_float = 2, max_year = 1000, model_name = "evolving bet-hedging")
+years2 = test2.run() 
+test2.var_comps()
+test2.get_summary()
+test2.plot(length = years2)
+test2.get_results(output = "among")
+test2.plot(to_plot= "among_list", length = years2)
+
+'''
+'''
+ #mu = mu_float + climate_rate * i
         #---or----
         #if i > max_year/2:
             #mu = mu_float + climate_jump
             
         #y_list.append(Year(mu, sigma_float, popsize, eggs = y_list[i-1].diapause_list))
         
-        y_list.append(Year(mu_float, sigma_float, popsize, eggs = y_list[i-1].diapause_list))
+       # y_list.append(Year(mu_float, sigma_float, popsize, eggs = y_list[i-1].diapause_list))
         #diapausing eggs of last year become new year's population (and will be 
         #reduced to popsize at year initialization))
-        if len(y_list[i].awake_list) == 0:
-            print ("population extinct!")
-            break
-        y_list[i].runyear(growth_rate, mut_rate)
-        print(".", end = '')
-    return(y_list)
         
-        
-def get_summary(output):
-    '''provide winter onsets and #survivors'''
-    #reaction_norms = [[],[],[],[],[],[]]
-    winter = []
-    for year in output:
-        winter.append([year.t_on, len(year.diapause_list), len(year.awake_list)])
-    return(winter)
-
-def get_results(output):
-    '''provide population level summary of reaction norm shape'''
-    reaction_norm = []
-    for year in output:  
-        print("-",end="")
-        b_list = []
-        c_list = []
-        d_list =[]
-        e_list =[]
-        within_list = []
-        among_list =[]
-        
-        for individual in year.diapause_list: #get every individuals's rn shape
-            b_list.append(individual.b)
-            c_list.append(individual.c)
-            d_list.append(individual.d)
-            e_list.append(individual.e)
-            within_list.append(individual.var_within())
-            among_list.append(individual.var_among())
-        reaction_norm.append([numpy.mean(b_list), numpy.mean(c_list), numpy.mean(d_list),
-                             numpy.mean(e_list), numpy.mean(within_list), 
-                             numpy.mean(among_list), numpy.std(among_list)])
-        #mean reaction norm shape of the year
-    
-    return(reaction_norm)#list with 6 mean RN shape parameters per year
-            
-        
-def plot_summary(results_list):
-    '''plot #survivors vs winter onset'''
-    x_list = [i for i in range(len(results_list))]
-    w_on = [i[0] for i in results_list]
-    surv = [i[1]/1000 for i in results_list]
-    dead = [i[2]/1000 for i in results_list]
-    plt.plot(x_list, w_on)
-    plt.show()
-
-def plot_details(res, sig):
-    ''' plot reaction norm parameters through time'''
-    x_list = [i for i in range(len(res))]
-    among =  [i[5] for i in res]
-    amongsd = [i[6] for i in res]
-  #  b =  [i[0] for i in res]
-   # c =  [i[1] for i in res]
-    #d =  [i[2] for i in res]
-    #e =  [i[3] for i in res]
-    plt.plot(x_list, among, label = "variance among" )
-    plt.legend()
-    plt.title("sigma = " + str(sig))
-    plt.show()
-    #to add: get extreme events from w_on and mark in this plot in 2 colours (max and min)
-
+'''      
 y_list_bh = run_program(sigma_float = 3, max_year = 100)
 print("bh done.\n\n")
 res_bh = get_results(y_list_bh)
 plot_details(res_bh,sig = 6)
 
-'''y_list_p = run_program(sigma_float = 0)
+y_list_p = run_program(sigma_float = 0)
 print("plasticity done.\n\n")
 res_p = get_results(y_list_p)
 plot_details(res_p, sig=0)
