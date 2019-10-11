@@ -24,12 +24,17 @@ individual decides whether to go to diapause, based on its reaction norm shape.
 If diapausing the individual is transferred to a seed bank (egg bank) of infinite size; 
 if not, it will remain and reproduce with a growth rate *growth_rate*. The offspring
 inherit the same genotype, except for the possibilty of mutations with a rate of 
-*mut_rate*. These mutations have quite large effects. 
+*mut_rate*.
 When t reaches winter onset,  all individuals will be removed. The next year begins
 and a new winter onset is drawn from a normal distribution with mean *mu_float* and 
 standard deviation *sigma_float*. The seed bank replaces the population from last year. 
 If the seed bank is larger than *popsize*, *popsize* individuals are randomly drawn 
 from the seed bank. The model runs for *max_year* years.
+The reaction norm is expected to evolve in response to *sigma_float* and *mu_float*.
+Highly plastic reaction norms have a steep slope (b), low lower limit(c) and high 
+upper limit(d), and the midpoint(e) lies close to *mu_float*. Diversified bet-hedging 
+reaction norms typically have a low b, or high c; a low d would be risk-seeking
+strategy
 
 The model uses variable notation as in the Python book by Punch and Enbody 
 (similar to google notation), but "_int" is not appended to variables of class integer.
@@ -64,7 +69,7 @@ class Individual (object):
         '''reproduces the individual r times, with slight deviations with p = mut_frac
         
         expected input: r = float > 0, mut_frac = float of range 0,1'''
-        integ, fract = math.floor(r), r- math.floor(r)
+        integ, fract = math.floor(r), r- math.floor(r) #integer part and fractional part
         return_list = []
         if random.uniform(0,1) < fract:
             integ +=1 
@@ -76,25 +81,24 @@ class Individual (object):
                        
             #add random mutation
             new_b = self.b if random.uniform(0,1) > mut_frac else random.gauss(self.b,0.1)
-            if new_b > 10:
-                new_b = 10 #very large slopes cause math.range error in .var_comps()
-                #if b*e > 710 => math.exp(710)
             new_c = self.c if random.uniform(0,1) > mut_frac else random.gauss(self.c,0.1)
             new_d = self.d if random.uniform(0,1) > mut_frac else random.gauss(self.d,0.1)     
             new_e = self.e if random.uniform(0,1) > mut_frac else random.gauss(self.e,0.1)
+            
+            #some exceptions: c has to be in range {0,1}, d in range {c,1} 
+            #b must be < 10, because very steep slopes cause math.range error in .var_comps()
+            #math.exp(b*e) can become too large to handle
+            if new_b > 10:
+                new_b = 10 
             if new_c < 0:
                 new_c = 0
             if new_c > 1:
                 new_c = 1
-            if new_d < new_c: #prevents upper bound from being smaller than lower bound
+            if new_d < new_c: 
                 new_d = new_c
             if new_d > 1:
                 new_d = 1  
             return_list.append(Individual(new_b, new_c, new_d, new_e))
-            #alternative c/d mutation: 
-            #new_c = self.c if random.uniform(0,1) > mut_frac else random.uniform(0,1)
-            #new_d = self.d if random.uniform(0,1) > mut_frac else random.uniform(new_c,1)
-               
         return (return_list)
     
     def check_diap (self, t_int):
@@ -104,7 +108,7 @@ class Individual (object):
         return(diap)
         
     def var_comps(self):
-        ''' calculate variance among environments (plasticity)
+        ''' calculate variance among and within environments
         
         var_within = sum p*(1-p) / n
         var_among = sd^2 / n'''
@@ -114,10 +118,10 @@ class Individual (object):
         for t in range(50):
             upper = (self.d-self.c) #=upper part of diap_probability equation
             lower = 1 + math.exp(-1*self.b* (t-self.e)) #lower part
-            prob = round(self.c + (upper/lower), 4)
-            probability.append(prob)#note constant c
+            prob = round(self.c + (upper/lower), 4) #rounding for numerical stbility
+            probability.append(prob)
             p2.append(prob * (1-prob))
-            #rounding included for numerical stability; sd(10^-130,10^-15, 0.2) etc
+            
         self.among = numpy.std(probability, ddof=1)
         self.within = numpy.mean(p2)    
           
@@ -125,30 +129,33 @@ class Individual (object):
 class Year(object):
     '''decisions of diapause and reproduction for 1 year
     
-    input: mu = mean winter onset, sigma = sd winter onset, both float; eggs = list,
-    each entry one instance of class Individual'''
+    input: mu = mean winter onset, sigma = sd winter onset, both float; eggs = list
+    of instances of class Individual'''
     def __init__ (self, mu, sigma, popsize, eggs):
         self.t_on = random.normalvariate(mu, sigma)
         self.t_on = round(self.t_on)
         self.awake_list = eggs if len(eggs) < popsize else random.sample(eggs, popsize)
+        #this winter carrying capacity is required to keep population sizes in check;
+        #summer carrying capacities would reduce the need to use the whole season
+        #(diminishing payoffs) and select for conservative reaction norms
         self.diapause_list = []
     
     def __str__(self):
         return ("Winter onset on day {}\nIn diapause:{}; awake:{}".format(
                 self.t_on, len(self.diapause_list),len(self.awake_list)))
     
-    def runday(self, gr_float, mut_float, t):
+    def runday(self, growth_rate, mut_rate, t):
         '''on each day, every Individual may enter diapause; if awake, it reproduces
         
         input: growth rate, mutation rate, both float; and t(int)'''
         offspring_list= []
         remove_from_awake_list =[]
         for individual in self.awake_list:
-            if individual.check_diap(t): #line both checks for diapause and returns outcome
+            if individual.check_diap(t):
                 self.diapause_list.append(individual)
                 remove_from_awake_list.append(individual)
             else:
-                offspring_list.extend(individual.reproduce(gr_float, mut_float))
+                offspring_list.extend(individual.reproduce(growth_rate, mut_rate))
                 #extend instead of append here because return of reproduce is a list, not
                 #an individual instance of Individual
         for rem in remove_from_awake_list:
@@ -161,12 +168,7 @@ class Year(object):
         for t in range(self.t_on):
             self.runday(growth_rate, mut_rate, t)
         #now that winter has arrived, self.awake_list could be discarded.
-        #only self.diapause_list remains important
-        #print ("survivors: ", len(self.diapause_list))
-
-
-
-            
+        #only self.diapause_list remains important            
     
 
 class Run_Program(object):
@@ -184,10 +186,10 @@ class Run_Program(object):
         
         self.t_on_list = [] #stores winter onsets of each year
         self.surv_list = [] #stores no. survivors of each year
-        self.y_list = []    #stores Year instances
-        
+        self.y_list = [self.initialize_pop()]    #stores Year instances
+    
+    def initialize_pop(self):
         pop_list = []
-        
         for i in range(self.popsize):
             b = random.gauss(1,0.5)
             c = random.uniform(0,0.5)
@@ -196,12 +198,15 @@ class Run_Program(object):
             pop_list.append(Individual(b,c,d,e))
         init = Year(self.mu_float, self.sigma_float, self.popsize, pop_list)
         init.diapause_list = init.awake_list
-        self.y_list.append(init)
+        return(init)
         
     def __str__(self):
-        return("PARAMETERS:\nr:{}N:{}mutrate:{}\n mu:{}sigma:{}end:{}".format(
-                self.growth_rate, self.popsize,self.mut_rate,
+        first_line = "PARAMETERS\n"
+        second_line = str(" r: {:5.2f}      N:{:4}    mutrate: {:4.2f} \n".format(
+                self.growth_rate, self.popsize,self.mut_rate))
+        third_line = str("mu: {:4.2f}  sigma: {:4.2f}   end: {:8}".format(
                 self.mu_float, self.sigma_float, self.max_year))
+        return(first_line+second_line+third_line)
         
     def run(self):
         print ("Running")
@@ -209,21 +214,23 @@ class Run_Program(object):
         for i in range(1, self.max_year): 
             self.y_list.append(Year(self.mu_float, self.sigma_float, self.popsize, 
                                     eggs = self.y_list[i-1].diapause_list))
-            #diapausing eggs of last year become new year's population (and will be 
-            #reduced to popsize at year initialization))
+            #this line also implies reduction to popsize at Year initialization
             if len(self.y_list[i].awake_list) == 0:
                 print ("population extinct!")
+                yc+=1
                 break
             self.y_list[i].runyear(self.growth_rate, self.mut_rate)
             yc +=1
             if not yc % 10: #if yc % 10 == 0
                 print(".", end = '')
+       
         self.y_list.pop(0)
         yc -= 1
         return(yc)
-    
+        
+
     def get_summary(self):
-        '''provide winter onsets and #survivors'''
+        '''provide winter onsets and no. of survivors'''
         for year in self.y_list:
             self.t_on_list.append(year.t_on)
             self.surv_list.append(len(year.diapause_list))
@@ -242,9 +249,9 @@ class Run_Program(object):
             ind_list = []
         
             for individual in year.diapause_list:  
-                ind_list.append(individual.__dict__[output])
+                ind_list.append(individual.__dict__[output]) #individual.b or individual.among...
             result.append(numpy.mean(ind_list))
-        self.__dict__[output+"_list"] = result
+        self.__dict__[output+"_list"] = result #create self.b_list or self.b_among_list...
         return(result)
             
         
@@ -257,20 +264,29 @@ class Run_Program(object):
         plt.show()
         
     def var_comps(self):
+        yc = 0
         for year in self.y_list:
+            yc += 1
+            if not yc % 10:
+                    print("-",end="")            
             for individual in year.diapause_list:
                 individual.var_comps()
 
+
+
 test = Run_Program(growth_rate= 1.1, sigma_float = 0, max_year = 1000, model_name = "evolving plasticity")
 years = test.run() 
+print("\ncalculating variance composition")
 test.var_comps()
+print("\ngetting survival data")
 test.get_summary()
 test.plot(length = years)
+print("getting variance among")
 test.get_results(output = "among")
 test.plot(to_plot= "among_list", length = years)
 
 
-
+'''
 test2 = Run_Program(growth_rate= 1.1, sigma_float = 2, max_year = 1000, model_name = "evolving bet-hedging")
 years2 = test2.run() 
 test2.var_comps()
@@ -278,20 +294,44 @@ test2.get_summary()
 test2.plot(length = years2)
 test2.get_results(output = "among")
 test2.plot(to_plot= "among_list", length = years2)
+'''
+
+'''
+test3 = Run_Program(growth_rate= 1.1, sigma_float = 8, max_year = 1000, model_name = "extinction")
+years3 = test3.run() 
+print("\ncalculating variance composition")
+test3.var_comps()
+print("getting survival data")
+test3.get_summary()
+print("plotting survival data")
+test3.plot(length = years3)
+print("getting variance among")
+test3.get_results(output = "among")
+print("\nplotting variance among")
+test3.plot(to_plot= "among_list", length = years3)
+
+
+discovered bug: when sigma is high and populations get low, y_list sometimes 
+stores wrong values. Survival figure shows in some years pop size is 
+reported as 0, but program keeps running. print statement in test.run method
+shows that pop size does not actually decrease to zero, so saving in y_list is 
+bugged '''
+    
+
 
 
 
 '''
 todo: add a change of means with time. 
 - mean increases at slow rate with year, sigma = 0
-==> expectation: evolution of e with high plasticity (genetic tracking)
+   ==> expectation: evolution of e with high plasticity (genetic tracking)
 - mean increases at high rate, sigma =0
-==> expectation: evolution of var_among (this essentially means that cue becomes too unreliable)
+   ==> expectation: evolution of var_among (this essentially means that cue becomes too unreliable)
 - mean increases at slow rate, sigma = 3
-==>evolution of e, but also of lower plasticity
+   ==>evolution of e, but also of lower plasticity
 - mean increases at high rate, sigma =3
-==> either faster evolution of high var_among (additive effects), or genetic assimilation:
-    var_among evolves cyclically, e follows (in longer streaks of temporal autocorrelation)
+   ==> either faster evolution of high var_among (additive effects), or genetic assimilation:
+    var_among evolves cyclically, e follows (in longer streaks of good years)
     
 - sudden jump in mean, sigma = 0
 ==> extinction
@@ -300,7 +340,7 @@ todo: add a change of means with time.
 
 
 
-''' 
+
  #mu = mu_float + climate_rate * i
         #---or----
         #if i > max_year/2:
@@ -311,3 +351,4 @@ todo: add a change of means with time.
        # y_list.append(Year(mu_float, sigma_float, popsize, eggs = y_list[i-1].diapause_list))
         #diapausing eggs of last year become new year's population (and will be 
         #reduced to popsize at year initialization)) 
+''' 
