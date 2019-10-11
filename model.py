@@ -152,6 +152,7 @@ class Year(object):
         remove_from_awake_list =[]
         for individual in self.awake_list:
             if individual.check_diap(t):
+                individual.var_comps() #time-intensive, so only performed when needed
                 self.diapause_list.append(individual)
                 remove_from_awake_list.append(individual)
             else:
@@ -186,7 +187,8 @@ class Run_Program(object):
         
         self.t_on_list = [] #stores winter onsets of each year
         self.surv_list = [] #stores no. survivors of each year
-        self.y_list = [self.initialize_pop()]    #stores Year instances
+        self.result_list =[]
+        self.old = self.initialize_pop()    #stores Year instances
     
     def initialize_pop(self):
         pop_list = []
@@ -209,106 +211,94 @@ class Run_Program(object):
         return(first_line+second_line+third_line)
         
     def run(self):
-        print ("Running")
+        print ("Running. 1 dot = 10 years")
         yc = 1
         for i in range(1, self.max_year): 
-            self.y_list.append(Year(self.mu_float, self.sigma_float, self.popsize, 
-                                    eggs = self.y_list[i-1].diapause_list))
+            y = Year(self.mu_float, self.sigma_float, self.popsize, 
+                                    eggs = self.old.diapause_list)
             #this line also implies reduction to popsize at Year initialization
-            if len(self.y_list[i].awake_list) == 0:
+            if len(y.awake_list) == 0:
                 print ("population extinct!")
                 yc+=1
                 break
-            self.y_list[i].runyear(self.growth_rate, self.mut_rate)
+            y.runyear(self.growth_rate, self.mut_rate)
+            self.result_list.append(self.save_all_results(y))
+            self.t_on_list.append(y.t_on)
+            self.surv_list.append(len(y.diapause_list))
             yc +=1
             if not yc % 10: #if yc % 10 == 0
                 print(".", end = '')
-       
-        self.y_list.pop(0)
-        yc -= 1
+            self.old = y
         return(yc)
-        
 
-    def get_summary(self):
-        '''provide winter onsets and no. of survivors'''
-        for year in self.y_list:
-            self.t_on_list.append(year.t_on)
-            self.surv_list.append(len(year.diapause_list))
-        
-
-    def get_results(self, output = "b"):
+    def save_result(self, y, output = "among"):
         '''provide population level summary of reaction norm shape
     
         input: "b", "c", "d", "e", "among" or "within". any other input throws error'''
-        result = []
-        yc = 0
-        for year in self.y_list:  
-            yc += 1
-            if not yc % 10:
-                print("-",end="")
-            ind_list = []
-        
-            for individual in year.diapause_list:  
+        ind_list =[]
+        for individual in y.diapause_list:  
                 ind_list.append(individual.__dict__[output]) #individual.b or individual.among...
-            result.append(numpy.mean(ind_list))
-        self.__dict__[output+"_list"] = result #create self.b_list or self.b_among_list...
-        return(result)
-            
+        return(numpy.mean(ind_list))
+    
+    def save_all_results(self,y):
+        '''not implemented'''
+        b_list =[]        
+        c_list =[]     
+        d_list =[]     
+        e_list =[]     
+        among_list =[]     
+        within_list =[]     
+        for individual in y.diapause_list:  
+                b_list.append(individual.b)
+                c_list.append(individual.c)
+                d_list.append(individual.d)
+                e_list.append(individual.e)
+                among_list.append(individual.among)
+                within_list.append(individual.within)
+                
+        return([numpy.mean(b_list), numpy.mean(c_list), numpy.mean(d_list),
+                numpy.mean(e_list), numpy.mean(among_list), numpy.mean(within_list)])
         
-    def plot (self, to_plot = "surv_list", length =0):
+        
+    def plot (self, to_plot = "surv_list"):
         '''docstring'''
-        x_list = [i for i in range(length)]
+        x_list = [i for i in range(len(self.result_list))]
         plt.plot(x_list, self.__dict__[to_plot], label = to_plot)
         plt.title(self.model_name)
         plt.legend()
         plt.show()
         
-    def var_comps(self):
-        yc = 0
-        for year in self.y_list:
-            yc += 1
-            if not yc % 10:
-                    print("-",end="")            
-            for individual in year.diapause_list:
-                individual.var_comps()
+    
+    def plot_results (self, to_plot = 0):
+        y_list = []
+        for i in self.result_list:
+            y_list.append(i[to_plot])
+        x_list = [i for i in range(len(self.result_list))]
+        name = ["slope", "lower limit", "upper limit", "midpoint", "among", "within"]            
+        plt.plot(x_list, y_list, label = name[to_plot])
+        plt.legend()
+        plt.show()
 
-
-
-test = Run_Program(growth_rate= 1.1, sigma_float = 0, max_year = 1000, model_name = "evolving plasticity")
-years = test.run() 
-print("\ncalculating variance composition")
-test.var_comps()
-print("\ngetting survival data")
-test.get_summary()
-test.plot(length = years)
-print("getting variance among")
-test.get_results(output = "among")
-test.plot(to_plot= "among_list", length = years)
-
+test = Run_Program(growth_rate= 1.1, sigma_float = 0, max_year = 500, model_name = "evolving plasticity")
+test.run()
+for i in range(6):
+    test.plot_results(i)
+#may lead to evolution of relatively flat slope (0.5) for first 500 years, next few
+    #thousand years leaad back to steep slope
 
 '''
-test2 = Run_Program(growth_rate= 1.1, sigma_float = 2, max_year = 1000, model_name = "evolving bet-hedging")
-years2 = test2.run() 
-test2.var_comps()
-test2.get_summary()
-test2.plot(length = years2)
-test2.get_results(output = "among")
-test2.plot(to_plot= "among_list", length = years2)
+test2 = Run_Program(growth_rate= 1.1, sigma_float = 2, max_year = 500, model_name = "evolving bet-hedging")
+test2.run()
+for i in range(6):
+    test2.plot_results(i)
+    #looks like risk-prone strategy(d becomes ~0.5), at least for first 500 runs. comparable to halketts model
 '''
 
 '''
 test3 = Run_Program(growth_rate= 1.1, sigma_float = 8, max_year = 1000, model_name = "extinction")
-years3 = test3.run() 
-print("\ncalculating variance composition")
-test3.var_comps()
-print("getting survival data")
-test3.get_summary()
-print("plotting survival data")
-test3.plot(length = years3)
-print("getting variance among")
-test3.get_results(output = "among")
-print("\nplotting variance among")
-test3.plot(to_plot= "among_list", length = years3)
+test3.run()
+for i in range(6):
+    test3.plot_results(i)
 
 
 discovered bug: when sigma is high and populations get low, y_list sometimes 
@@ -322,7 +312,10 @@ bugged '''
 
 
 '''
-todo: add a change of means with time. 
+todo: 
+    ***add "all" methods to save_results
+    ***winter severity: low prob of dying when winter arrives --> canalization (loss of reaction norm)
+    ***add a change of means with time.*** 
 - mean increases at slow rate with year, sigma = 0
    ==> expectation: evolution of e with high plasticity (genetic tracking)
 - mean increases at high rate, sigma =0
