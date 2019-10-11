@@ -7,15 +7,20 @@ Created on Mon Oct  7 13:45:18 2019
 
 '''
 This is a model of reaction norm evolution along a bet-hedging-plasticity
-continuum. Other models on bet-hedging/plasticity either assume two reaction norms
-evolving (1 to a predictable cue = plasticity, 1 to white noise; e.g. Tufto 2015),
-or an independent contribution of 1 reaction norm and an instability locus 
-(e.g. Scheiner2014). This model assumes that there is a single polyphenic reaction 
-norm evolving, its shape determines whether we call this strategy bet-hedging
-or plasticity (see also  https://doi.org/10.1101/752881 and 10.32942/osf.io/trg34).
-The model simulates a multivoltine species that has to diapause before winter onset,
-but winter onset is not predictable across years. Depending on the standard 
-deviation of winter onset, more plasticity or more bet-hedging is expected to evolve.
+continuum. The model simulates a multivoltine species that has to diapause before winter onset,
+but winter onset is not predictable across years. On the one hand, continued reproduction
+leads to exponential growth; on the other hand, a too late diapause decision kills the genotype.
+The decision to diapause is modelled as logistic reaction norm (probability of diapause ~ day length),
+and depending on the standard deviation of winter onset, more plasticity or more bet-hedging is 
+expected to evolve.
+If winter onset is predictable (standard deviation = 0), the reaction norm is expected
+to evolve a steep slope (plasticity), inducing diapause just before mean winter onset. If the 
+standard deviation is high (winter unpredictable), the reaction norm may evolve an early inflection
+point (conservative bet-hedging), or a flat slope / low range (e.g. >10% diapause probability
+under any day length), such that some offspring will be diapausing regardless of winter onset
+(diversified bet-hedging). The shape of the reaction norm can be summarised by variance among 
+environments and variance within environments (see also  https://doi.org/10.1101/752881 and 
+10.32942/osf.io/trg34).
 
 A starting population has *popsize* individuals. Each individual has a different
 genotype with four properties (*b,c,d,e*), whic determine logistic reaction norm shape 
@@ -279,41 +284,38 @@ class Run_Program(object):
         plt.legend()
         plt.show()
 
+'''
 test = Run_Program(growth_rate= 1.1, sigma_float = 0, max_year = 500, model_name = "evolving plasticity")
 test.run()
 for i in range(6):
-    test.plot_results(i)
-#may lead to evolution of relatively flat slope (0.5) for first 500 years, next few
-    #thousand years leaad back to steep slope
+    test.plot_results(i) # among is most important fig: high among = plasticity, low among = bet-hedging
+#in test run this led to evolution of relatively flat slope (0.5) for first 500 years, but 
+    #then slope increased again
+'''
 
 '''
-test2 = Run_Program(growth_rate= 1.1, sigma_float = 2, max_year = 500, model_name = "evolving bet-hedging")
+test2 = Run_Program(growth_rate= 1.1, sigma_float = 4, max_year = 500, model_name = "evolving bet-hedging")
 test2.run()
 for i in range(6):
     test2.plot_results(i)
-    #looks like risk-prone strategy(d becomes ~0.5), at least for first 500 runs. comparable to halketts model
+    #in test run this gave conservative bet-hedging (e = 14, c = 0, b >1), though 
+    #towards the end d crashed (to 0.5), making it a very risk-prone bet-hedigng strategy
 '''
 
 '''
 test3 = Run_Program(growth_rate= 1.1, sigma_float = 8, max_year = 1000, model_name = "extinction")
-test3.run()
+test3.run() #should eventually lead to extinction, but not crash
 for i in range(6):
     test3.plot_results(i)
 
-
-discovered bug: when sigma is high and populations get low, y_list sometimes 
-stores wrong values. Survival figure shows in some years pop size is 
-reported as 0, but program keeps running. print statement in test.run method
-shows that pop size does not actually decrease to zero, so saving in y_list is 
-bugged '''
-    
+'''
+   
 
 
 
 
 '''
 todo: 
-    ***add "all" methods to save_results
     ***winter severity: low prob of dying when winter arrives --> canalization (loss of reaction norm)
     ***add a change of means with time.*** 
 - mean increases at slow rate with year, sigma = 0
@@ -344,4 +346,5 @@ todo:
        # y_list.append(Year(mu_float, sigma_float, popsize, eggs = y_list[i-1].diapause_list))
         #diapausing eggs of last year become new year's population (and will be 
         #reduced to popsize at year initialization)) 
+        
 ''' 
