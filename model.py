@@ -122,48 +122,6 @@ class Individual (object):
         self.within = numpy.mean(p2)    
           
     
-class Year(object):
-    '''decisions of diapause and reproduction for 1 year
-    
-    input: mu = mean winter onset, sigma = sd winter onset, both float; eggs = list
-    of instances of class Individual'''
-    def __init__ (self, mu, sigma, popsize, eggs):
-        self.t_on = random.normalvariate(mu, sigma)
-        self.t_on = round(self.t_on)
-        self.awake_list = eggs if len(eggs) < popsize else random.sample(eggs, popsize)
-        #this winter carrying capacity is required to keep population sizes in check;
-        #summer carrying capacities would reduce the need to use the whole season
-        #(diminishing payoffs) and select for conservative reaction norms
-        self.diapause_list = []
-    
-    def __str__(self):
-        return ("Winter onset on day {}\nIn diapause:{}; awake:{}".format(
-                self.t_on, len(self.diapause_list),len(self.awake_list)))
-    
-    def runday(self, growth_rate, mut_rate, t):
-        '''on each day, every Individual may enter diapause; if awake, it reproduces
-        
-        input: growth rate, mutation rate, both float; and t(int)'''
-        offspring_list= []
-        for individual in self.awake_list:
-            if individual.check_diap(t):
-                individual.var_comps() #time-intensive, so only performed when needed
-                #(implicitly skips those that don't make it to diapause before winter onset)
-                self.diapause_list.append(individual)
-            else:
-                offspring_list.extend(individual.reproduce(growth_rate, mut_rate))
-                #extend instead of append here because return of reproduce is a list, not
-                #an individual instance of Individual
-        self.awake_list = offspring_list
-    
-    def runyear(self, growth_rate, mut_rate):
-        '''do daily stuff until winter arrives; then kill all non-diapausing Individuals'''
-        
-        #a bit of a placeholder method - could add further stuff here if needed
-        #could eventually also be integrated with runday method
-        for t in range(self.t_on):
-            self.runday(growth_rate, mut_rate, t)
-        #now that winter has arrived, self.awake_list could be discarded.
         #only self.diapause_list remains important            
     
 
@@ -182,8 +140,7 @@ class Run_Program(object):
         
         self.t_on_list = [] #stores winter onsets of each year
         self.surv_list = [] #stores no. survivors of each year
-        self.result_list =[]
-        self.old = self.initialize_pop()    #stores Year instances
+        self.result_list =[]#stores mean reaction norm properties of each year
     
     def initialize_pop(self):
         pop_list = []
@@ -193,9 +150,7 @@ class Run_Program(object):
             d= random.uniform(0.5,1)
             e = random.gauss(self.mu_float,self.sigma_float * 2)
             pop_list.append(Individual(b,c,d,e))
-        init = Year(self.mu_float, self.sigma_float, self.popsize, pop_list)
-        init.diapause_list = init.awake_list
-        return(init)
+        return(pop_list)
         
     def __str__(self):
         first_line = "PARAMETERS\n"
@@ -205,26 +160,52 @@ class Run_Program(object):
                 self.mu_float, self.sigma_float, self.max_year))
         return(first_line+second_line+third_line)
         
+        
     def run(self):
         print ("Running. 1 dot = 10 years")
         yc = 1
+        eggs = self.initialize_pop()    #stores Year instances
+        
         for i in range(1, self.max_year): 
-            y = Year(self.mu_float, self.sigma_float, self.popsize, 
-                                    eggs = self.old.diapause_list)
-            #this line also implies reduction to popsize at Year initialization
-            if len(y.awake_list) == 0:
+            t_on = random.normalvariate(self.mu, self.sigma)
+            t_on = round(t_on)
+            self.t_on_list.append(t_on)
+            
+            awake_list = eggs if len(eggs) < self.popsize else\
+            random.sample(eggs, self.popsize)
+            
+            if not awake_list:
                 print ("population extinct!")
                 yc+=1
-                break
-            y.runyear(self.growth_rate, self.mut_rate)
-            self.result_list.append(self.save_all_results(y))
-            self.t_on_list.append(y.t_on)
-            self.surv_list.append(len(y.diapause_list))
-            yc +=1
-            if not yc % 10: #if yc % 10 == 0
-                print(".", end = '')
-            self.old = y
+            else:
+                eggs = self.runyear(awake_list, t_on)          
+                self.result_list.append(self.save_all_results())
+                self.surv_list.append(len(eggs))
+                yc +=1
+                if not yc % 10: #if yc % 10 == 0
+                    print(".", end = '')
         return(yc)
+        
+    def runyear(self, spring_list, end):
+        '''on each day, every Individual may enter diapause; if awake, it reproduces
+        
+        input: growth rate, mutation rate, both float; and t(int)'''
+        diapause_list =[]
+        curr_list= spring_list
+        for t in range(end):
+            offspring_list = []
+            for individual in curr_list:
+                if individual.check_diap(t):
+                    individual.var_comps() #time-intensive, so only performed when needed
+                    #(implicitly skips those that don't make it to diapause before winter onset)
+                    diapause_list.append(individual)
+                else:
+                    offspring_list.extend(individual.reproduce(self.growth_rate, self.mut_rate))
+                #extend instead of append here because return of reproduce is a list, not
+                #an individual instance of Individual
+            curr_list = offspring_list
+        return (diapause_list)
+        
 
     def save_result(self, y, output = "among"):
         '''provide population level summary of reaction norm shape
