@@ -66,8 +66,7 @@ class Individual (object):
         self.e = e #- inf to +inf, expected ~mu_float
         
     def __str__ (self):
-        x = str("slope: {:.3f} lower limit: {:.3f} upper limit: {:.3f} midpoint: {:.3f}".format(
-                self.b, self.c, self.d, self.e))
+        x = f"slope: {self.b:.3f} lower limit: {self.c:.3f} upper limit: {self.d:.3f} midpoint: {self.e:.3f}"
         return (x)
     
     def reproduce(self, r, mut_frac): 
@@ -85,24 +84,16 @@ class Individual (object):
             # = adult + 2.5 offspring
                        
             #add random mutation
-            new_b = self.b if random.uniform(0,1) > mut_frac else random.gauss(self.b,0.1)
-            new_c = self.c if random.uniform(0,1) > mut_frac else random.gauss(self.c,0.1)
-            new_d = self.d if random.uniform(0,1) > mut_frac else random.gauss(self.d,0.1)     
-            new_e = self.e if random.uniform(0,1) > mut_frac else random.gauss(self.e,0.1)
-            
-            #some exceptions: c has to be in range {0,1}, d in range {c,1} 
+            new_b = self.b if random.uniform(0,1) > mut_frac else \
+            min(random.gauss(self.b,0.1),10) #min makes sure value stays below 10
             #b must be < 10, because very steep slopes cause math.range error in .var_comps()
             #math.exp(b*e) can become too large to handle
-            if new_b > 10:
-                new_b = 10 
-            if new_c < 0:
-                new_c = 0
-            if new_c > 1:
-                new_c = 1
-            if new_d < new_c: 
-                new_d = new_c
-            if new_d > 1:
-                new_d = 1  
+            new_c = self.c if random.uniform(0,1) > mut_frac else \
+            min(max(0,random.gauss(self.c,0.1)),1) # 0< c < 1
+            new_d = self.d if random.uniform(0,1) > mut_frac else \
+            min(max(new_c,random.gauss(self.d,0.1)),1)     #c<d<1
+            new_e = self.e if random.uniform(0,1) > mut_frac else \
+            random.gauss(self.e,0.1)
             return_list.append(Individual(new_b, new_c, new_d, new_e))
         return (return_list)
     
@@ -154,23 +145,22 @@ class Year(object):
         
         input: growth rate, mutation rate, both float; and t(int)'''
         offspring_list= []
-        remove_from_awake_list =[]
         for individual in self.awake_list:
             if individual.check_diap(t):
                 individual.var_comps() #time-intensive, so only performed when needed
+                #(implicitly skips those that don't make it to diapause before winter onset)
                 self.diapause_list.append(individual)
-                remove_from_awake_list.append(individual)
             else:
                 offspring_list.extend(individual.reproduce(growth_rate, mut_rate))
                 #extend instead of append here because return of reproduce is a list, not
                 #an individual instance of Individual
-        for rem in remove_from_awake_list:
-            self.awake_list.remove(rem)
-        self.awake_list.extend(offspring_list)
+        self.awake_list = offspring_list
     
     def runyear(self, growth_rate, mut_rate):
         '''do daily stuff until winter arrives; then kill all non-diapausing Individuals'''
         
+        #a bit of a placeholder method - could add further stuff here if needed
+        #could eventually also be integrated with runday method
         for t in range(self.t_on):
             self.runday(growth_rate, mut_rate, t)
         #now that winter has arrived, self.awake_list could be discarded.
