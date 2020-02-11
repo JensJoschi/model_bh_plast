@@ -51,6 +51,7 @@ import random
 import numpy
 import math
 import matplotlib.pyplot as plt
+from collections import Counter
 
 '''classes'''
 class Individual (object):
@@ -80,21 +81,11 @@ class Individual (object):
             
             
         for i in range(0,integ): 
+            n = Individual(self.b, self.c, self.d, self.e)
+            n.mutate(mut_frac)
             #for r =3.5, the loop will run 2 times in 50% of cases, 3 times in the other 50%
             # = adult + 2.5 offspring
-                       
-            #add random mutation
-            new_b = self.b if random.uniform(0,1) > mut_frac else \
-            min(random.gauss(self.b,0.1),10) #min makes sure value stays below 10
-            #b must be < 10, because very steep slopes cause math.range error in .var_comps()
-            #math.exp(b*e) can become too large to handle
-            new_c = self.c if random.uniform(0,1) > mut_frac else \
-            min(max(0,random.gauss(self.c,0.1)),1) # 0< c < 1
-            new_d = self.d if random.uniform(0,1) > mut_frac else \
-            min(max(new_c,random.gauss(self.d,0.1)),1)     #c<d<1
-            new_e = self.e if random.uniform(0,1) > mut_frac else \
-            random.gauss(self.e,0.1)
-            return_list.append(Individual(new_b, new_c, new_d, new_e))
+            return_list.append(n)
         return (return_list)
     
     def check_diap (self, t_int):
@@ -120,20 +111,31 @@ class Individual (object):
             
         self.among = numpy.std(probability, ddof=1)
         self.within = numpy.mean(p2)    
-   
+    def mutate(self, mut_frac):
+       self.b = self.b if random.uniform(0,1) > mut_frac else \
+            min(random.gauss(self.b,0.1),10) #min makes sure value stays below 10
+            #b must be < 10, because very steep slopes cause math.range error in .var_comps()
+            #math.exp(b*e) can become too large to handle
+       self.c = self.c if random.uniform(0,1) > mut_frac else \
+            min(max(0,random.gauss(self.c,0.02)),1) # 0< c < 1
+       self.d = self.d if random.uniform(0,1) > mut_frac else \
+            min(max(self.c,random.gauss(self.d,0.02)),1)     #c<d<1
+       self.e = self.e if random.uniform(0,1) > mut_frac else \
+            random.gauss(self.e,0.1)
     
 
 class Run_Program(object):
     '''run the model'''
-    def __init__ (self, growth_rate = 1.2, popsize = 250, mut_rate = 1/250,
-                max_year = 2000, t_max = 50, model_name = "generic", winter_list = [0],
-                severity = 0.5):
+    def __init__ (self, growth_rate = 1.1, popsize = 250, summer_mut = 0, winter_mut = 1/100,
+                max_year = 1000, t_max = 50, model_name = "generic", winter_list = [],
+                severity = 0.5, startpop = [], offset = 0):
         '''saves parameters and creates starting population'''
         
         #parameters
         self.growth_rate = growth_rate
         self.popsize = popsize
-        self.mut_rate = mut_rate
+        self.summer_mut = summer_mut
+        self.winter_mut = winter_mut
         self.max_year = max_year
         self.t_max = t_max
         self.model_name = model_name
@@ -141,22 +143,27 @@ class Run_Program(object):
         self.severity = severity
         #results
         self.results = numpy.zeros((self.max_year,10))
+        self.offset = offset
         #stores: w_on; no. survivors; b; c; d; e; within; among, ratio, sum
         
         #starting population
-        self.eggs = []
-        for i in range(self.popsize):
-            b = random.gauss(1,0.5)
-            c = random.uniform(0,0.5)
-            d= random.uniform(0.5,1)
-            e = random.gauss(numpy.mean(self.winter_list), 5)
-            self.eggs.append(Individual(b,c,d,e))
+        self.eggs = startpop
+        if not self.eggs:
+            for i in range(self.popsize):
+                b = random.gauss(1,0.5)
+                c = random.uniform(0,0.5)
+                d= random.uniform(0.5,1)
+                e = random.gauss(25, 5)
+                self.eggs.append(Individual(b,c,d,e))
+                
+        if not winter_list:
+            self.winter_list = [(self.t_max/2) for i in range(self.max_year)]
         
     def __str__(self):
         first_line = "PARAMETERS\n"
-        second_line = str(" r: {:5.2f}      N:{:4}    mutrate: {:4.2f} \n".format(
-                self.growth_rate, self.popsize,self.mut_rate))
-        third_line = str("end: {:8}".format(self.max_year))
+        second_line = str(" r: {:5.2f}      N:{:4}    summer mut: {:4.2f} \n".format(
+                self.growth_rate, self.popsize,self.summer_mut))
+        third_line = str("winter mut: {:4.2f}    end: {:8}".format(self.winter_mut, self.max_year))
         return(first_line+second_line+third_line)
         
         
@@ -172,6 +179,8 @@ class Run_Program(object):
                 print ("population extinct!")
                 yc+=1
             else:
+                for individual in self.eggs:
+                    individual.mutate(self.winter_mut)
                 self.eggs = self.runyear(awake_list, w_on)        
                 self.results[i,:] = self.save_results(w_on, self.eggs)   
                 yc +=1
@@ -189,24 +198,17 @@ class Run_Program(object):
         for t in range(self.t_max):
             offspring_list = []
             for individual in curr_list:
-                if t < end:
-                    if individual.check_diap(t):
-                        diapause_list.append(individual)
-                    else:
-                        offspring_list.extend(individual.reproduce(self.growth_rate, self.mut_rate))
-                        #extend instead of append here because return of reproduce is a list, not
-                   #an individual instance of Individual
+                if individual.check_diap(t):
+                    diapause_list.append(individual)
                 else:
-                    if bool(numpy.random.binomial(1,1-self.severity)):
-                        if individual.check_diap(t):
-                            diapause_list.append(individual)
-                        else:
-                            offspring_list.extend(individual.reproduce(self.growth_rate, self.mut_rate))
-                            #extend instead of append here because return of reproduce is a list, not
-                            #an individual instance of Individual
-                    
+                    gr = self.growth_rate if t < end else self.growth_rate * (1-self.severity) 
+                    offspring_list.extend(individual.reproduce(gr, self.summer_mut))
+                        #extend instead of append here because return of reproduce is a list, not
+                   #an individual instance of Individual                
             curr_list = offspring_list
-       
+        
+        for i in diapause_list:
+            i.b = i.b - self.offset
         return (diapause_list)
     
     def save_results(self, w_on, eggs):
@@ -223,7 +225,18 @@ class Run_Program(object):
             t = t + 1
         return (numpy.concatenate(([w_on], [len(eggs)],numpy.mean(x,axis=0)),axis=0))
             
-                
+    def save_all (self, eggs):
+        x = numpy.zeros((len(eggs),3))
+        t= 0
+        for individual in eggs:
+            individual.var_comps(self.t_max)
+            x[t,:] = [individual.e, 
+             individual.among/(individual.among+ individual.within),
+             individual.among + individual.within]
+            t = t+ 1
+        counter=Counter(x)
+        result = [list(counter.keys()),list(counter.values())]
+        return (result)
         
     def plot (self, to_plot = 0):
         '''docstring'''
@@ -235,53 +248,86 @@ class Run_Program(object):
         plt.title(self.model_name)
         plt.show()
 
+
+predictable = Run_Program(max_year= 1000)
+test = Run_Program(max_year = 1000, offset = 1)
 '''
-climate = []
-file = open('E:\g02-modelling\AGE00147705.txt', 'r')
-line = file.readline()
-while line:
-    climate.append(round(int(line.strip())/8))
-    line = file.readline()
-file.close()
-clim2 = random.sample(climate, 5000)
-test = Run_Program(growth_rate = 1.05, winter_list = clim2, max_year= 5000, model_name = "test")
-#not tested after changing code a bit, but older run results: 
-#no survivors ~ 1500-200 with frequent drops to ~ 500; slope 1-3, upper limit 0.6 - 0.9,
-#slope negatively correlated with upper lim, midpoint slow increase 40-43'''
+predictable= Run_Program(model_name = "Predictable climate",max_year =5000)
+predictable_mild = Run_Program(model_name = "Predictable but mild", 
+                   severity = 0.2,max_year =5000)
 
-climate = []
-for i in range(1000):
-    climate.append(round(random.normalvariate(25,0)))
-predictable= Run_Program(growth_rate= 1.1, max_year = 1000, model_name = "Evolving plasticity", 
-                   winter_list = climate, severity = 1)
+var_climate = [round(random.normalvariate(25,3)) for i in range(5000)]
+variable = Run_Program(model_name = "Unpredictable", winter_list = var_climate,
+                       max_year =5000)
+variable_mild = Run_Program(model_name = "Unpredictable and mild", 
+                   winter_list = var_climate, severity = 0.3,max_year =5000)
+
+
+
 predictable.run()
-for i in range(10):
-    predictable.plot(i) 
-
-predictable_mild = Run_Program(growth_rate= 1.1, max_year = 1000, model_name = "Evolving plasticity", 
-                   winter_list = climate, severity = 0.1)
 predictable_mild.run()
-for i in range(10):
-    predictable_mild.plot(i) 
-
-
-climate = []
-for i in range(1000):
-    climate.append(round(random.normalvariate(25,3)))
-variable = Run_Program(growth_rate= 1.1, max_year = 1000, model_name = "Evolving plasticity", 
-                   winter_list = climate, severity = 1)
-variable.run()
-for i in range(10):
-    variable.plot(i) 
-variable_mild = Run_Program(growth_rate= 1.1, max_year = 1000, model_name = "Evolving plasticity", 
-                   winter_list = climate, severity = 0.1)
+variable.run() 
 variable_mild.run()
-for i in range(10):
-    variable_mild.plot(i)     
+
+
+ind = Individual(b = numpy.mean(predictable.results[:,2]), 
+                      c = numpy.mean(predictable.results[:,3]),
+                      d = numpy.mean(predictable.results[:,4]),
+                      e = numpy.mean(predictable.results[:,5]))
+startpop = [ind for i in range(2000)]
+
+climate_slow = [25 + i /10 for i in range(50)]
+climate_fast = [25 + i/2 for i in range(50)]
+climate_neg  = [25 - i/2 for i in range(50)]
+
+climate_slow_var = [round(random.normalvariate(25,3))+ i/10 for i in range(50)]
+climate_fast_var = [round(random.normalvariate(25,3))+ i/2  for i in range(50)]
+climate_neg_var  = [round(random.normalvariate(25,3))- i/2  for i in range(50)]
     
-''''
+
+slow_plastic = Run_Program(model_name = "plastic +slow", 
+                   winter_list = climate_slow, max_year = 50, startpop = startpop)
+fast_plastic = Run_Program(model_name = "plastic + fast", 
+                   winter_list = climate_fast, max_year = 50, startpop = startpop)
+neg_plastic = Run_Program(model_name = "plastic + negative", 
+                   winter_list = climate_neg, max_year = 50, startpop = startpop)
+
+
+ind2 = Individual(b = numpy.mean(variable.results[:,2]), 
+                      c = numpy.mean(variable.results[:,3]),
+                      d = numpy.mean(variable.results[:,4]),
+                      e = numpy.mean(variable.results[:,5]))
+startpop_var = [ind2 for i in range(2000)]
+
+
+slow_var = Run_Program(model_name = "bet-hedger + slow", 
+                   winter_list = climate_slow, max_year = 50, startpop = startpop_var)
+fast_var = Run_Program(model_name = "bet-hedger + fast", 
+                   winter_list = climate_fast, max_year = 50, startpop = startpop_var)
+neg_var = Run_Program(model_name = "bet-hedger + negative", 
+                   winter_list = climate_neg, max_year = 50, startpop = startpop_var)
+
+
+climate_step = [25 if i<5 else 20 for i in range(500)]
+step_plastic = Run_Program(model_name = "step + plastic", 
+                   winter_list = climate_step, startpop = startpop, max_year = 500)
+step_bh      = Run_Program(model_name = "step + bet-hedger",
+                   winter_list = climate_step, startpop = startpop_var, max_year = 500) 
+
+slow_plastic.run()
+fast_plastic.run()
+neg_plastic.run()
+slow_var.run()
+fast_var.run()
+neg_var.run()
+step_plastic.run()
+step_bh.run()
+
+'''
+
+'''
 todo: 
-    ***winter severity: low prob of dying when winter arrives --> canalization (loss of reaction norm)
+    advance vs shorten season (diff payoff)
     ***add a change of means with time.*** 
 - mean increases at slow rate with year, sigma = 0
    ==> expectation: evolution of e with high plasticity (genetic tracking)
@@ -312,4 +358,21 @@ todo:
         #diapausing eggs of last year become new year's population (and will be 
         #reduced to popsize at year initialization)) 
         
-''' 
+'''
+
+
+
+'''
+climate = []
+file = open('E:\g02-modelling\AGE00147705.txt', 'r')
+line = file.readline()
+while line:
+    climate.append(round(int(line.strip())/8))
+    line = file.readline()
+file.close()
+clim2 = random.sample(climate, 5000)
+test = Run_Program(growth_rate = 1.05, winter_list = clim2, max_year= 5000, model_name = "test")
+#not tested after changing code a bit, but older run results: 
+#no survivors ~ 1500-200 with frequent drops to ~ 500; slope 1-3, upper limit 0.6 - 0.9,
+#slope negatively correlated with upper lim, midpoint slow increase 40-43'''
+ 
