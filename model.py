@@ -6,40 +6,40 @@ Created on Mon Oct  7 13:45:18 2019
 """
 
 '''
-This is a model of reaction norm evolution along a bet-hedging-plasticity
-continuum. The model simulates a multivoltine species that has to diapause before winter onset,
-but winter onset is not predictable across years. On the one hand, continued reproduction
-leads to exponential growth; on the other hand, a too late diapause decision kills the genotype.
-The decision to diapause is modelled as logistic reaction norm (probability of diapause ~ day length),
-and depending on the standard deviation of winter onset, more plasticity or more bet-hedging is 
-expected to evolve.
-If winter onset is predictable (standard deviation = 0), the reaction norm is expected
-to evolve a steep slope (plasticity), inducing diapause just before mean winter onset. If the 
-standard deviation is high (winter unpredictable), the reaction norm may evolve an early inflection
-point (conservative bet-hedging), or a flat slope / low range (e.g. >10% diapause probability
-under any day length), such that some offspring will be diapausing regardless of winter onset
+The model simulates the trade-off between investment in growth and in reproduction 
+in unpredictable and changing conditions.
+An individual is allowed to grow until it makes the irreversible decision to start 
+dormancy, upon which its resources are converted into offspring. The longer it grows, 
+the higher the number of offspring; but when winter arrives, all non-dormant individuals
+die. Winter onset is unpredictable (depending on model parameters), so there is a 
+trade-off between high (arithmetic) mean growth rates and survival. 
+
+A starting population has *popsize* individuals. Each individual has a different
+genotype with four properties (*b,c,d,e* = slope, lower limit, upper limit, midpoint), 
+which determine logistic reaction norm shape in response to *t* (time, e.g. day length). 
+This reaction norm determines the probability of dormancy as function of time. 
+While non-dormant, the individual grows linearly with a groth rate *growth_rate*. Upon
+deciding for dormancy, the resources are converted into offspring, at the rate
+*growth_rate* * *t*. The offspring inherit the same genotype, except for the possibilty 
+of mutations with a rate of *mut_rate*. The seed bank then replaces the population 
+from last year and a new year begins. If the seed bank is larger than *popsize*, 
+*popsize* individuals are randomly drawn from the seed bank.
+Winter onset *t_on* is drawn for a normal distribution with mean *mu_float* and 
+standard deviation *sigma_float*. When *t_on* reaches winter onset, the growth rate 
+is set to 0 (except for models that include winter severity, see below), i.e. the 
+individual dies. If winter onset is predictable (standard deviation = 0), the reaction
+norm is expected to evolve a steep slope (plasticity), inducing dormancy just before 
+mean winter onset. If the standard deviation is high (winter unpredictable), the
+reaction norm may evolve an early inflection point (conservative bet-hedging), 
+or a flat slope, such that some offspring will be diapausing regardless of winter onset
 (diversified bet-hedging). The shape of the reaction norm can be summarised by variance among 
 environments and variance within environments (see also  https://doi.org/10.1101/752881 and 
 10.32942/osf.io/trg34).
-
-A starting population has *popsize* individuals. Each individual has a different
-genotype with four properties (*b,c,d,e*), whic determine logistic reaction norm shape 
-in response to *t* (time, e.g. day length). In each time step t, each 
-individual decides whether to go to diapause, based on its reaction norm shape. 
-If diapausing the individual is transferred to a seed bank (egg bank) of infinite size; 
-if not, it will remain and reproduce with a growth rate *growth_rate*. The offspring
-inherit the same genotype, except for the possibilty of mutations with a rate of 
-*mut_rate*.
-When t reaches winter onset,  all individuals will be removed. The next year begins
-and a new winter onset is drawn from a normal distribution with mean *mu_float* and 
-standard deviation *sigma_float*. The seed bank replaces the population from last year. 
-If the seed bank is larger than *popsize*, *popsize* individuals are randomly drawn 
-from the seed bank. The model runs for *max_year* years.
-The reaction norm is expected to evolve in response to *sigma_float* and *mu_float*.
-Highly plastic reaction norms have a steep slope (b), low lower limit(c) and high 
-upper limit(d), and the midpoint(e) lies close to *mu_float*. Diversified bet-hedging 
-reaction norms typically have a low b, or high c; a low d would be risk-seeking
-strategy
+The model parameter *severity* determines the growth rate reduction upon winter onset.
+The default value of 1 reduces the growth rate to 0, i.e. the organism is unable to produce
+offspring when winter arrives; a value of 0.5 reduces offspring number by half, and a value 
+of 0 means that winter onset does not affect fitness. Decreasing winter severity is expected
+to increase canalization, i.e. a decreased upper limit of the reaction norm shapes
 
 The model uses variable notation as in the Python book by Punch and Enbody 
 (similar to google notation), but "_int" is not appended to variables of class integer.
@@ -64,7 +64,7 @@ class Individual (object):
         self.b = b #-inf to +inf, though values > |5| carry little meaning
         self.c = c #0 to 1
         self.d = d #0 to 1, though should generally be >c
-        self.e = e #- inf to +inf, expected ~mu_float
+        self.e = e #- inf to +inf, expected ~ 25
         
     def __str__ (self):
         x = f"slope: {self.b:.3f} lower limit: {self.c:.3f} upper limit: {self.d:.3f} midpoint: {self.e:.3f}"
@@ -78,13 +78,10 @@ class Individual (object):
         return_list = []
         if random.uniform(0,1) < fract:
             integ +=1 
-            
-            
         for i in range(0,integ): 
             n = Individual(self.b, self.c, self.d, self.e)
             n.mutate(mut_frac)
             #for r =3.5, the loop will run 2 times in 50% of cases, 3 times in the other 50%
-            # = adult + 2.5 offspring
             return_list.append(n)
         return (return_list)
     
@@ -104,13 +101,17 @@ class Individual (object):
         p2 = []
         for t in range(t_max):
             upper = (self.d-self.c) #=upper part of diap_probability equation
-            lower = 1 + math.exp(-1*self.b* (t-self.e)) #lower part
-            prob = round(self.c + (upper/lower), 4) #rounding for numerical stbility
+            if (t - self.e >50): #this check is needed to prevent math.range error
+                lower = 1
+            else:
+                lower = 1 + math.exp(-1*self.b* (t-self.e)) #lower part
+            prob = round(self.c + (upper/lower), 4)
             probability.append(prob)
             p2.append(prob * (1-prob))
             
         self.among = numpy.std(probability, ddof=1)
         self.within = numpy.mean(p2)    
+        
     def mutate(self, mut_frac):
        self.b = self.b if random.uniform(0,1) > mut_frac else \
             min(random.gauss(self.b,0.1),10) #min makes sure value stays below 10
@@ -126,31 +127,30 @@ class Individual (object):
 
 class Run_Program(object):
     '''run the model'''
-    def __init__ (self, growth_rate = 1.1, popsize = 250, summer_mut = 0, winter_mut = 1/100,
-                max_year = 1000, t_max = 50, model_name = "generic", winter_list = [],
-                severity = 0.5, startpop = [], offset = 0):
+    def __init__ (self, growth_rate = 0.5, popsize = 1000, summer_mut = 0, winter_mut = 0.2/100,
+                max_year = 20000, t_max = 50, model_name = "generic", winter_list = [],
+                severity = 1, startpop = []):
         '''saves parameters and creates starting population'''
         
         #parameters
-        self.growth_rate = growth_rate
-        self.popsize = popsize
-        self.summer_mut = summer_mut
-        self.winter_mut = winter_mut
+        self.growth_rate = growth_rate #no offspring for each time step in which
+        #the individual is not dormant; e.g. 0.5, dormancy at day 25 --> 12.5 offspring
+        self.popsize = popsize #population size at start of the year
+        self.summer_mut = summer_mut #not implemented, leave at 0
+        self.winter_mut = winter_mut 
         self.max_year = max_year
         self.t_max = t_max
         self.model_name = model_name
         self.winter_list = winter_list
-        self.severity = severity
-        #results
+        self.severity = severity #penalty of not being dormant after winter arrival 
         self.results = numpy.zeros((self.max_year,10))
-        self.offset = offset
         #stores: w_on; no. survivors; b; c; d; e; within; among, ratio, sum
         
         #starting population
         self.eggs = startpop
         if not self.eggs:
             for i in range(self.popsize):
-                b = random.gauss(1,0.5)
+                b = random.gauss(1,3)
                 c = random.uniform(0,0.5)
                 d= random.uniform(0.5,1)
                 e = random.gauss(25, 5)
@@ -168,7 +168,7 @@ class Run_Program(object):
         
         
     def run(self):
-        print ("Running. 1 dot = 10 years")
+        print ("Running. 1 dot = 100 years")
         yc = 1
           
         for i in range(0, self.max_year): 
@@ -184,32 +184,28 @@ class Run_Program(object):
                 self.eggs = self.runyear(awake_list, w_on)        
                 self.results[i,:] = self.save_results(w_on, self.eggs)   
                 yc +=1
-                if not yc % 10: 
+                if not yc % 100: 
                     print(".", end = '')
         return(yc)
         
-    def runyear(self, spring_list, end):
+    def runyear(self, curr_list, end):
         '''on each day, every Individual may enter diapause; if awake, it reproduces
         
         input: list of individuals; number of days until winter onset
-        output: list of individuals that made it to diapause before winter onset'''
-        diapause_list =[]
-        curr_list= spring_list
+        output: offspring (from those indivdiduals that made it to dormancy before winter'''
+        diapause_list = []
         for t in range(self.t_max):
-            offspring_list = []
-            for individual in curr_list:
-                if individual.check_diap(t):
-                    diapause_list.append(individual)
-                else:
-                    gr = self.growth_rate if t < end else self.growth_rate * (1-self.severity) 
-                    offspring_list.extend(individual.reproduce(gr, self.summer_mut))
-                        #extend instead of append here because return of reproduce is a list, not
-                   #an individual instance of Individual                
-            curr_list = offspring_list
-        
-        for i in diapause_list:
-            i.b = i.b - self.offset
-        return (diapause_list)
+            gr = self.growth_rate * t if t < end else self.growth_rate * (1-self.severity) * t  
+            newlist = []
+            if curr_list:
+                for individual in curr_list:
+                    if individual.check_diap(t):
+                        diapause_list.extend(individual.reproduce(gr, self.summer_mut))
+                    else: 
+                        newlist.append(individual)
+            curr_list = newlist
+        return(diapause_list)      
+
     
     def save_results(self, w_on, eggs):
         '''stores: w_on; no. survivors; b; c; d; e; among; within'''
@@ -217,11 +213,13 @@ class Run_Program(object):
         t=0
 
         for individual in eggs:
-            individual.var_comps(self.t_max)
+ #           individual.var_comps(self.t_max)
             x[t,:] = [individual.b, individual.c, individual.d, 
-             individual.e, individual.among, individual.within, 
-             individual.among/(individual.among+individual.within), 
-             individual.among + individual.within]
+             individual.e,
+             0,0,0,0]
+             #individual.among, individual.within, 
+    #         individual.among/(individual.among+individual.within), 
+   #          individual.among + individual.within]
             t = t + 1
         return (numpy.concatenate(([w_on], [len(eggs)],numpy.mean(x,axis=0)),axis=0))
             
@@ -249,65 +247,98 @@ class Run_Program(object):
         plt.show()
 
 
-predictable = Run_Program(max_year= 1000)
-test = Run_Program(max_year = 1000, offset = 1)
-'''
-predictable= Run_Program(model_name = "Predictable climate",max_year =5000)
+
+predictable= Run_Program(model_name = "Predictable climate")
+
 predictable_mild = Run_Program(model_name = "Predictable but mild", 
-                   severity = 0.2,max_year =5000)
+                   severity = 0.5)
 
-var_climate = [round(random.normalvariate(25,3)) for i in range(5000)]
-variable = Run_Program(model_name = "Unpredictable", winter_list = var_climate,
-                       max_year =5000)
+var_climate = [round(random.normalvariate(25,3)) for i in range(20000)]
+variable = Run_Program(model_name = "Unpredictable", winter_list = var_climate)
 variable_mild = Run_Program(model_name = "Unpredictable and mild", 
-                   winter_list = var_climate, severity = 0.3,max_year =5000)
+                   winter_list = var_climate, severity = 0.5)
 
 
-
+print("model: predictable conditions\n")
 predictable.run()
+print("\nmodel: predictable conditions, mild winters\n")
 predictable_mild.run()
+print("\nmodel: variable conditions\n")
 variable.run() 
+print("\nmodel: variable conditions, mild winters\n")
 variable_mild.run()
 
 
-ind = Individual(b = numpy.mean(predictable.results[:,2]), 
-                      c = numpy.mean(predictable.results[:,3]),
-                      d = numpy.mean(predictable.results[:,4]),
-                      e = numpy.mean(predictable.results[:,5]))
-startpop = [ind for i in range(2000)]
+plast_pop = []
+r =  random.sample(range(20000), 1000) 
+for i in range(1000):
+    plast_pop.append(Individual(b = predictable.results[r[i],2], 
+                      c = predictable.results[r[i],3],
+                      d = predictable.results[r[i],4],
+                      e = predictable.results[r[i],5]))
+    
+var_pop = []
+for i in range(1000):
+    var_pop.append(Individual(b = variable.results[r[i],2], 
+                      c = variable.results[r[i],3],
+                      d = variable.results[r[i],4],
+                      e = variable.results[r[i],5]))
 
-climate_slow = [25 + i /10 for i in range(50)]
-climate_fast = [25 + i/2 for i in range(50)]
-climate_neg  = [25 - i/2 for i in range(50)]
 
-climate_slow_var = [round(random.normalvariate(25,3))+ i/10 for i in range(50)]
-climate_fast_var = [round(random.normalvariate(25,3))+ i/2  for i in range(50)]
-climate_neg_var  = [round(random.normalvariate(25,3))- i/2  for i in range(50)]
+plast_in_var = Run_Program(model_name = "plastic genotype, variable env", winter_list =
+var_climate, startpop = plast_pop, max_year = 10000)
+var_in_plast = Run_Program(model_name = "bet-hedger, stable env", max_year = 10000,
+startpop = var_pop)
+print("\n\nmodel: plastic genotype put in variable conditions\n")
+plast_in_var.run()
+print("\nmodel: bet-hedger put in constant conditions\n")
+var_in_plast.run()
+
+
+climate_slow = [25 + i /10 for i in range(10000)]
+climate_fast = [25 + i/2 for i in range(10000)]
+climate_neg  = [25 - i/2 for i in range(10000)]
+
+climate_slow_var = [round(random.normalvariate(25,3))+ i/10 for i in range(10000)]
+climate_fast_var = [round(random.normalvariate(25,3))+ i/2  for i in range(10000)]
+climate_neg_var  = [round(random.normalvariate(25,3))- i/2  for i in range(10000)]
     
 
 slow_plastic = Run_Program(model_name = "plastic +slow", 
-                   winter_list = climate_slow, max_year = 50, startpop = startpop)
+                   winter_list = climate_slow, max_year = 10000, startpop = plast_pop, 
+                   t_max =5000)
 fast_plastic = Run_Program(model_name = "plastic + fast", 
-                   winter_list = climate_fast, max_year = 50, startpop = startpop)
+                   winter_list = climate_fast, max_year = 10000, startpop = plast_pop,
+                   t_max = 5000)
 neg_plastic = Run_Program(model_name = "plastic + negative", 
-                   winter_list = climate_neg, max_year = 50, startpop = startpop)
+                   winter_list = climate_neg, max_year = 10000, startpop = plast_pop, 
+                   t_max =5000)
 
-
-ind2 = Individual(b = numpy.mean(variable.results[:,2]), 
-                      c = numpy.mean(variable.results[:,3]),
-                      d = numpy.mean(variable.results[:,4]),
-                      e = numpy.mean(variable.results[:,5]))
-startpop_var = [ind2 for i in range(2000)]
-
+print("\n\nmodel: plastic genotype, slow environmental change\n")
+slow_plastic.run()
+print("\nmodel: plastic genotype, fast environmental change\n")
+fast_plastic.run()
+print("\nmodel: plastic genotype, negative and fast environmental change\n")
+#neg_plastic.run()
 
 slow_var = Run_Program(model_name = "bet-hedger + slow", 
-                   winter_list = climate_slow, max_year = 50, startpop = startpop_var)
+                   winter_list = climate_slow, max_year = 10000, 
+                   startpop = var_pop, t_max=5000)
 fast_var = Run_Program(model_name = "bet-hedger + fast", 
-                   winter_list = climate_fast, max_year = 50, startpop = startpop_var)
+                   winter_list = climate_fast, max_year = 10000, 
+                   startpop = var_pop,t_max=5000)
 neg_var = Run_Program(model_name = "bet-hedger + negative", 
-                   winter_list = climate_neg, max_year = 50, startpop = startpop_var)
+                   winter_list = climate_neg, max_year = 10000, 
+                   startpop = var_pop,t_max=5000)
 
+print("\nmodel: bet-hedger, slow environmental change\n")
+slow_var.run()
+print("\nmodel: bet-hedger, fast environmental change\n")
+fast_var.run()
+print("\nmodel: bet-hedger, negative and fast environmental change\n")
+#neg_var.run()
 
+'''
 climate_step = [25 if i<5 else 20 for i in range(500)]
 step_plastic = Run_Program(model_name = "step + plastic", 
                    winter_list = climate_step, startpop = startpop, max_year = 500)
