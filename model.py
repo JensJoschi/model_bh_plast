@@ -18,7 +18,7 @@ A starting population has *popsize* individuals. Each individual has a different
 genotype with four properties (*b,c,d,e* = slope, lower limit, upper limit, midpoint), 
 which determine logistic reaction norm shape in response to *t* (time, e.g. day length). 
 This reaction norm determines the probability of dormancy as function of time. 
-While non-dormant, the individual grows linearly with a groth rate *growth_rate*. Upon
+While non-dormant, the individual grows linearly with a growth rate *growth_rate*. Upon
 deciding for dormancy, the resources are converted into offspring, at the rate
 *growth_rate* * *t*. The offspring inherit the same genotype, except for the possibilty 
 of mutations with a rate of *mut_rate*. The seed bank then replaces the population 
@@ -194,10 +194,11 @@ class Run_Program(object):
         input: list of individuals; number of days until winter onset
         output: offspring (from those indivdiduals that made it to dormancy before winter'''
         diapause_list = []
+        severe_bool = bool(numpy.random.binomial(1,self.severity))
         for t in range(self.t_max):
-            gr = self.growth_rate * t if t < end else self.growth_rate * (1-self.severity) * t  
+            gr = self.growth_rate * t # if t < end else self.growth_rate * (1-self.severity) * t  
             newlist = []
-            if curr_list:
+            if (curr_list and not (t > end and severe_bool)):
                 for individual in curr_list:
                     if individual.check_diap(t):
                         diapause_list.extend(individual.reproduce(gr, self.summer_mut))
@@ -247,7 +248,7 @@ class Run_Program(object):
         plt.show()
 
 
-
+'''
 predictable= Run_Program(model_name = "Predictable climate")
 
 predictable_mild = Run_Program(model_name = "Predictable but mild", 
@@ -270,19 +271,19 @@ variable_mild.run()
 
 
 plast_pop = []
-r =  random.sample(range(20000), 1000) 
+r =  random.sample(range(len(predictable.eggs)), 1000) 
 for i in range(1000):
-    plast_pop.append(Individual(b = predictable.results[r[i],2], 
-                      c = predictable.results[r[i],3],
-                      d = predictable.results[r[i],4],
-                      e = predictable.results[r[i],5]))
+    plast_pop.append(Individual(b = predictable.eggs[r[i],2], 
+                      c = predictable.eggs[r[i],3],
+                      d = predictable.eggs[r[i],4],
+                      e = predictable.eggs[r[i],5]))
     
 var_pop = []
 for i in range(1000):
-    var_pop.append(Individual(b = variable.results[r[i],2], 
-                      c = variable.results[r[i],3],
-                      d = variable.results[r[i],4],
-                      e = variable.results[r[i],5]))
+    var_pop.append(Individual(b = variable.eggs[r[i],2], 
+                      c = variable.eggs[r[i],3],
+                      d = variable.eggs[r[i],4],
+                      e = variable.eggs[r[i],5]))
 
 
 plast_in_var = Run_Program(model_name = "plastic genotype, variable env", winter_list =
@@ -337,7 +338,7 @@ print("\nmodel: bet-hedger, fast environmental change\n")
 fast_var.run()
 print("\nmodel: bet-hedger, negative and fast environmental change\n")
 #neg_var.run()
-
+'''
 '''
 climate_step = [25 if i<5 else 20 for i in range(500)]
 step_plastic = Run_Program(model_name = "step + plastic", 
