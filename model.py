@@ -87,6 +87,7 @@ class Individual (object):
     
     def check_diap (self, t_int):
         '''test for diapause given individual's reaction norm shape and t'''
+        
         diap_probability = self.c + (self.d-self.c)/(1+math.exp(-self.b*(t_int-self.e))) 
         diap_bool = bool(numpy.random.binomial(1,diap_probability))
         return(diap_bool)
@@ -100,12 +101,13 @@ class Individual (object):
         probability = []
         p2 = []
         for t in range(t_max):
+            #calulate diapause probability (see individual.check_diap)
             upper = (self.d-self.c) #=upper part of diap_probability equation
             if (t - self.e >50): #this check is needed to prevent math.range error
                 lower = 1
             else:
                 lower = 1 + math.exp(-1*self.b* (t-self.e)) #lower part
-            prob = round(self.c + (upper/lower), 4)
+            prob = round(self.c + (upper/lower), 4) 
             probability.append(prob)
             p2.append(prob * (1-prob))
             
@@ -113,6 +115,7 @@ class Individual (object):
         self.within = numpy.mean(p2)    
         
     def mutate(self, mut_frac):
+       '''induces mutations in the individual's reaction norm'''
        self.b = self.b if random.uniform(0,1) > mut_frac else \
             min(random.gauss(self.b,0.1),10) #min makes sure value stays below 10
             #b must be < 10, because very steep slopes cause math.range error in .var_comps()
@@ -127,28 +130,25 @@ class Individual (object):
 
 class Run_Program(object):
     '''run the model'''
-    def __init__ (self, growth_rate = 0.5, popsize = 500, summer_mut = 0, winter_mut = 1/100,
-                max_year = 20000, t_max = 50, model_name = "generic", winter_list = [],
-                severity = 1, startpop = []):
+    def __init__ (self, model_name = "generic", max_year = 20000,  popsize = 1000,
+                  winter_list = [],  startpop = [], severity = 1, winter_mut = 1/100,
+                 t_max = 50,growth_rate = 0.5, summer_mut = 0):
         '''saves parameters and creates starting population'''
         
-        #parameters
+        self.model_name = model_name
+        self.max_year = max_year
+        self.popsize = popsize #population size at start of the year
+        self.winter_list = winter_list
+        self.eggs = startpop
+        self.severity = severity #penalty if not being dormant after winter arrival 
+        self.winter_mut = winter_mut 
+        self.t_max = t_max
         self.growth_rate = growth_rate #no offspring for each time step in which
         #the individual is not dormant; e.g. 0.5, dormancy at day 25 --> 12.5 offspring
-        self.popsize = popsize #population size at start of the year
         self.summer_mut = summer_mut #not implemented, leave at 0
-        self.winter_mut = winter_mut 
-        self.max_year = max_year
-        self.t_max = t_max
-        self.model_name = model_name
-        self.winter_list = winter_list
-        self.severity = severity #penalty of not being dormant after winter arrival 
-        self.results = numpy.zeros((self.max_year,10))
+        self.results = numpy.zeros((self.max_year,10)) #not implemented
         self.all_results = []
-        #stores: w_on; no. survivors; b; c; d; e; within; among, ratio, sum
         
-        #starting population
-        self.eggs = startpop
         if not self.eggs:
             for i in range(self.popsize):
                 b = random.gauss(1,3)
@@ -161,10 +161,11 @@ class Run_Program(object):
             self.winter_list = [(self.t_max/2) for i in range(self.max_year)]
         
     def __str__(self):
-        first_line = "PARAMETERS\n"
-        second_line = str(" r: {:5.2f}      N:{:4}    summer mut: {:4.2f} \n".format(
-                self.growth_rate, self.popsize,self.summer_mut))
-        third_line = str("winter mut: {:4.2f}    end: {:8}".format(self.winter_mut, self.max_year))
+        first_line = str("model: {}\n".format(self.model_name))
+        second_line = str("Years: {:6}   N:{:4}   severity: {:4.2f}\n".format(
+                self.max_year, self.popsize, self.severity))
+        third_line = str("r: {:5.2f},  season length: {:3}, mutation rate: {:4.2f}\n".format(
+                self.growth_rate, self.t_max, self.winter_mut))
         return(first_line+second_line+third_line)
         
         
@@ -177,13 +178,12 @@ class Run_Program(object):
             awake_list = self.eggs if len(self.eggs) < self.popsize else\
             random.sample(self.eggs, self.popsize)   
             if not awake_list:
-                print ("population extinct!")
+           #     print ("population extinct!")
                 yc+=1
             else:
                 for individual in self.eggs:
                     individual.mutate(self.winter_mut)
                 self.eggs = self.runyear(awake_list, w_on)        
-           #     self.results[i,:] = self.save_results(w_on, self.eggs)   
                 self.all_results.append(self.save_all(self.eggs))
                 yc +=1
                 if not yc % 100: 
@@ -196,9 +196,10 @@ class Run_Program(object):
         input: list of individuals; number of days until winter onset
         output: offspring (from those indivdiduals that made it to dormancy before winter'''
         diapause_list = []
-        severe_bool = bool(numpy.random.binomial(1,self.severity))
+        severe_bool = bool(numpy.random.binomial(1,self.severity)) #is winter severe?
+        #if winter is not severe, it does not have an effect of life history
         for t in range(self.t_max):
-            gr = self.growth_rate * t # if t < end else self.growth_rate * (1-self.severity) * t  
+            gr = self.growth_rate * t 
             newlist = []
             if (curr_list and not (t > end and severe_bool)):
                 for individual in curr_list:
@@ -211,6 +212,7 @@ class Run_Program(object):
 
     
     def save_all (self, eggs):
+        '''Saves reaction norm properties of offspring'''
         x = numpy.zeros((len(eggs),3))
         t= 0
         for individual in eggs:
@@ -226,7 +228,7 @@ class Run_Program(object):
 
     def plot_all (self, to_plot=0):
         lablist = ["slope", "upper limit", "midpoint", "survivors"]
-        ax = [8,1,40,0] 
+        ax = [10,1,40,0] 
         x = []
         y = []
         if to_plot <3:
@@ -249,45 +251,16 @@ class Run_Program(object):
             plt.plot(x)
         plt.show()
 
-
-#not used anymore:
-    def save_results(self, w_on, eggs):
-        '''stores: w_on; no. survivors; b; c; d; e; among; within'''
-        x = numpy.zeros((len(eggs),8))
-        t=0
-
-        for individual in eggs:
-            individual.var_comps(self.t_max)
-            x[t,:] = [individual.b, individual.c, individual.d, 
-             individual.e,
-             individual.among, individual.within, 
-             individual.among/(individual.among+individual.within), 
-             individual.among + individual.within]
-            t = t + 1
-        return (numpy.concatenate(([w_on], [len(eggs)],numpy.mean(x,axis=0)),axis=0))
-            
-    def plot (self, to_plot = 0):
-        '''docstring'''
-        lablist = ["Winter onset", "No. survivors", "slope", "Lower limit", 
-                   "Upper limit", "Midpoint", "Variance among", "Variance within",
-                   "Variance ratio", "Phenotypic variance"]
-        plt.plot(self.results[:, to_plot])
-        plt.ylabel(lablist[to_plot])
-        plt.title(self.model_name)
-        plt.show()
-
-
-
 '''functions'''
 def make_pop(model, popsize):
     '''builds a population based on final population of another run'''
     pop = []
     r =  random.sample(range(len(model.eggs)), popsize)   
     for i in range(popsize):
-        pop.append(Individual(b = model.eggs[r[i],2], 
-                      c = model.eggs[r[i],3],
-                      d = model.eggs[r[i],4],
-                      e = model.eggs[r[i],5]))
+        pop.append(Individual(b = model.eggs[r[i]].b, 
+                      c = model.eggs[r[i]].c,
+                      d = model.eggs[r[i]].d,
+                      e = model.eggs[r[i]].e))
     return(pop)
 
 
@@ -300,7 +273,7 @@ def make_climate(mu =25, sigma = 0, trend = 0, n = 20000):
     return(climate)
     
     
-my = 10    #approx 9 sec/100 years = 30 min per model
+my = 20000    #approx 9 sec/100 years = 30 min per model
 var_climate = make_climate(sigma = 3, n = my)
 
 climate_slow = make_climate(trend = 1/10, n = my/2)
@@ -327,12 +300,12 @@ variable_mild.run()
 
 
 '''plastic genotype in variable climate and vice versa'''
-plast_pop = make_pop(predictable, 500)
-var_pop = make_pop(variable, 500)
+plast_pop = make_pop(predictable, 1000)
+var_pop = make_pop(variable, 1000)
 
-plast_in_var = Run_Program(model_name = "plastic genotype, variable env", max_year = my,
-                           winter_list =var_climate, startpop = plast_pop)
-var_in_plast = Run_Program(model_name = "bet-hedger, stable env", max_year = my,
+plast_in_var = Run_Program(model_name = "plastic genotype, variable env", max_year = int(my/4),
+                           winter_list =var_climate[0:int(my/4)], startpop = plast_pop)
+var_in_plast = Run_Program(model_name = "bet-hedger, stable env", max_year = int(my/4),
                            startpop = var_pop)
 
 plast_in_var.run()
@@ -341,21 +314,24 @@ var_in_plast.run()
 
 
 '''trends in environment'''
-slow_plastic = Run_Program(model_name = "plastic +slow", my = my/2, 
+slow_plastic = Run_Program(model_name = "plastic +slow", max_year = int(my/2), 
                    winter_list = climate_slow, startpop = plast_pop, 
-                   t_max =my/2)
-fast_plastic = Run_Program(model_name = "plastic + fast", max_year =my/4,
+                   t_max =math.ceil(max(climate_slow)))
+fast_plastic = Run_Program(model_name = "plastic + fast", max_year =int(my/4),
                    winter_list = climate_fast, startpop = plast_pop,
-                   t_max = my/4)
+                   t_max = math.ceil(max(climate_fast)))
 neg_plastic = Run_Program(model_name = "plastic + negative", 
-                   winter_list = climate_neg, max_year = my/4, 
-                   startpop = plast_pop, t_max = my/4)
-slow_var = Run_Program(model_name = "bet-hedger + slow", max_year = my/2,
-                   winter_list = climate_slow, startpop = var_pop, t_max = my/2)
-fast_var = Run_Program(model_name = "bet-hedger + fast",  max_year = my/4, 
-                   winter_list = climate_fast, startpop = var_pop,t_max = my/4)
-neg_var = Run_Program(model_name = "bet-hedger + negative", max_year = my/4, 
-                   winter_list = climate_neg, startpop = var_pop,t_max=my/4)
+                   winter_list = climate_neg, max_year = int(my/4), 
+                   startpop = plast_pop, t_max = math.ceil(max(climate_neg)))
+slow_var = Run_Program(model_name = "bet-hedger + slow", max_year = int(my/2),
+                   winter_list = climate_slow, startpop = var_pop, 
+                   t_max = math.ceil(max(climate_slow)))
+fast_var = Run_Program(model_name = "bet-hedger + fast",  max_year = int(my/4), 
+                   winter_list = climate_fast, startpop = var_pop,
+                   t_max = math.ceil(max(climate_fast)))
+neg_var = Run_Program(model_name = "bet-hedger + negative", max_year = int(my/4), 
+                   winter_list = climate_neg, startpop = var_pop,
+                   t_max = math.ceil(max(climate_neg)))
 
 slow_plastic.run()
 fast_plastic.run()
@@ -365,10 +341,10 @@ fast_var.run()
 neg_var.run()
 
 
-climate_step = [25 if i<5 else 20 for i in range(my/4)]
-step_plastic = Run_Program(model_name = "step + plastic", max_year = my/4,
+climate_step = [25 if i<5 else 20 for i in range(int(my/4))]
+step_plastic = Run_Program(model_name = "step + plastic", max_year = int(my/4),
                    winter_list = climate_step, startpop = plast_pop)
-step_bh      = Run_Program(model_name = "step + bet-hedger",max_year = my/4,
+step_bh      = Run_Program(model_name = "step + bet-hedger",max_year = int(my/4),
                    winter_list = climate_step, startpop = var_pop) 
 
 step_plastic.run()
