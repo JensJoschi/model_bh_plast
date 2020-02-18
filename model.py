@@ -104,22 +104,22 @@ class Individual (object):
     def mutate(self, mut_frac):
        '''induces mutations in the individual's reaction norm'''
        self.b = self.b if random.uniform(0,1) > mut_frac else \
-            min(random.gauss(self.b,0.1),10) #min makes sure value stays below 10
+            random.uniform(0,10) #min makes sure value stays below 10
             #b must be < 10, because very steep slopes cause math.range error in .var_comps()
             #math.exp(b*e) can become too large to handle
        self.c = self.c if random.uniform(0,1) > mut_frac else \
-            min(max(0,random.gauss(self.c,0.02)),1) # 0< c < 1
+            random.uniform(0,1) # 0< c < 1
        self.d = self.d if random.uniform(0,1) > mut_frac else \
-            min(max(self.c,random.gauss(self.d,0.02)),1)     #c<d<1
+            random.uniform(self.c,1)     #c<d<1
        self.e = self.e if random.uniform(0,1) > mut_frac else \
-            random.gauss(self.e,0.1)
+            random.uniform(0,50)
     
 
 class Run_Program(object):
     '''run the model'''
-    def __init__ (self, model_name = "generic", max_year = 40000,  popsize = 1000,
-                  winter_list = [],  startpop = [], severity = 1, winter_mut = 1/100,
-                 t_max = 50,growth_rate = 0.8):
+    def __init__ (self, model_name = "generic", max_year = 10000,  popsize = 1000,
+                  winter_list = [],  startpop = [], severity = 1, winter_mut = 1/10000,
+                 t_max = 50,growth_rate = 0.8, direction = 0):
         '''saves parameters and creates starting population'''
         
         self.model_name = model_name
@@ -135,6 +135,9 @@ class Run_Program(object):
         self.all_results = []
         self.startpop = startpop
         self.eggs = startpop
+        self.direction  = direction #climate change in days/year.
+        #this will actually not change the climate data, but the mean of the reaction 
+        #norms of all individuals
         if not self.eggs:
             for i in range(self.popsize):
                 b = random.gauss(1,3)
@@ -167,6 +170,7 @@ class Run_Program(object):
             random.sample(self.eggs, self.popsize)   
             if awake_list:
                 for individual in self.eggs:
+                    individual.e = individual.e - self.direction
                     individual.mutate(self.winter_mut)
                 self.eggs = self.runyear(awake_list, w_on)        
                 self.all_results.append(self.save_all(self.eggs))
@@ -199,7 +203,7 @@ class Run_Program(object):
         '''on each day, every Individual may enter diapause; if awake, it reproduces
         
         input: list of individuals; number of days until winter onset
-        output: offspring (from those indivdiduals that made it to dormancy before winter'''
+        output: offspring from those indivdiduals that made it to dormancy before winter'''
         diapause_list = []
         severe_bool = bool(numpy.random.binomial(1,self.severity)) #is winter severe?
         #if winter is not severe, it does not have an effect of life history
@@ -251,7 +255,7 @@ class Run_Program(object):
         plt.axis([0, len(self.all_results), 0 ,ax[to_plot]])
         if to_plot <3:    
             for i in numpy.arange(0,len(self.all_results),int(self.max_year/100)):
-                plt.scatter(numpy.full((len(x[i])),i), x[i], c = y[i]/sum(y[i]), 
+                plt.scatter(numpy.full((len(x[i])),i), x[i], c = sum(y[i])/y[i], 
                         cmap = "Blues_r", s =10, marker = "s")
         else:
             plt.plot(x)
@@ -283,92 +287,75 @@ def make_climate(mu =25, sigma = 0, trend = 0, n = 20000):
 
 '''standard models '''  
 
-my = 40000
+my = 10000
 var_climate = make_climate(sigma = 4, n = my)
         
-predictable= Run_Program(model_name = "Predictable_climate", max_year = int(my/10))
-predictable_mild = Run_Program(model_name = "Predictable_but_mild", max_year = my,
-                   severity = 0.5)
-
+predictable= Run_Program(model_name = "Predictable_climate", max_year = int(my/4))
 variable = Run_Program(model_name = "Unpredictable",  max_year = my, 
                        winter_list = var_climate)
-variable_mild = Run_Program(model_name = "Unpredictable_mild", max_year = my, 
-                   winter_list = var_climate, severity = 0.5)
 
 
-predictable.run() #predictable runs on my/10
-
-predictable_mild.run() #not expected to differ from predictable
+predictable.run() 
 variable.run() 
-variable_mild.run()
 
 
 '''environments and climates for further models'''
 plast_pop = make_pop(predictable, 1000)
 var_pop = make_pop(variable, 1000)
-plast_neg_pop = copy.deepcopy(plast_pop)
-for i in plast_neg_pop:
-    i.e = i.e + my/8
-var_neg_pop = copy.deepcopy(var_pop)
-for i in var_neg_pop:
-    i.e = i.e + my/8
-    
-climate_step = [25 if i<5 else 20 for i in range(int(my/4))]
-climate_slow = make_climate(trend = 1/10, n = my/2)
-climate_fast = make_climate(trend =  1/2, n = my/4)
-climate_neg  = make_climate(trend = -1/2, n = my/4, mu = my/8)
-climate_slow_var = make_climate(sigma = 4, trend = 1/10, n = my/2)
-climate_fast_var = make_climate(sigma = 4, trend =  1/2, n = my/4)
-climate_neg_var  = make_climate(sigma = 4, trend = -1/2, n = my/4, mu = my/8)
+
  
 '''plastic genotype in variable climate and vice versa'''
+'''
 plast_in_var = Run_Program(model_name = "plastic_variable", max_year = my,
                            winter_list =var_climate, startpop = plast_pop)
 var_in_plast = Run_Program(model_name = "bet_hedger_stable", max_year = int(my/4),
                            startpop = var_pop)
-
+'''
 '''trends in environment'''
-slow_plastic = Run_Program(model_name = "plastic_slow", max_year = int(my/2), 
-                   winter_list = climate_slow, startpop = plast_pop, 
-                   t_max =math.ceil(max(climate_slow)))
-fast_plastic = Run_Program(model_name = "plastic_fast", max_year =int(my/4),
-                   winter_list = climate_fast, startpop = plast_pop,
-                   t_max = math.ceil(max(climate_fast)))
-neg_plastic = Run_Program(model_name = "plastic_negative", 
-                   winter_list = climate_neg, max_year = int(my/4), 
-                   startpop = plast_neg_pop, t_max = math.ceil(max(climate_neg)))
-slow_var = Run_Program(model_name = "bet_hedger_slow", max_year = int(my/2),
-                   winter_list = climate_slow, startpop = var_pop, 
-                   t_max = math.ceil(max(climate_slow)))
-fast_var = Run_Program(model_name = "bet_hedger_fast",  max_year = int(my/4), 
-                   winter_list = climate_fast, startpop = var_pop,
-                   t_max = math.ceil(max(climate_fast)))
-neg_var = Run_Program(model_name = "bet_hedger_negative", max_year = int(my/4), 
-                   winter_list = climate_neg, startpop = var_neg_pop,
-                   t_max = math.ceil(max(climate_neg)))
 
+slow_pred_plastic = Run_Program(model_name = "plastic_slow",
+                   startpop = plast_pop, direction = 0.01)
+fast_pred_plastic = Run_Program(model_name = "plastic_fast", 
+                   startpop = plast_pop, direction =  0.1)
+neg_pred_plastic = Run_Program(model_name = "plastic_negative", 
+                   startpop = plast_pop, direction = -0.1)
 
+slow_pred_bh = Run_Program(model_name = "bet_hedger_slow", 
+                   startpop = var_pop, direction = 0.01)
+fast_pred_bh = Run_Program(model_name = "bet_hedger_fast", 
+                   startpop = var_pop, direction =  0.1)
+neg_pred_bh  = Run_Program(model_name = "bet_hedger_negative", 
+                   startpop = var_pop, direction = -0.1)
 
-step_plastic = Run_Program(model_name = "step_plastic", max_year = int(my/4),
-                   winter_list = climate_step, startpop = plast_pop)
-step_bh      = Run_Program(model_name = "step_bet_hedger",max_year = int(my/4),
-                   winter_list = climate_step, startpop = var_pop) 
+slow_var_plastic = Run_Program(model_name = "plastic_slow",
+                   winter_list = var_climate, startpop = plast_pop, direction = 0.01)
+fast_var_plastic = Run_Program(model_name = "plastic_fast", 
+                   winter_list = var_climate, startpop = plast_pop, direction =  0.1)
+neg_var_plastic = Run_Program(model_name = "plastic_negative", 
+                   winter_list = var_climate, startpop = plast_pop, direction = -0.1)
 
+slow_var_bh = Run_Program(model_name = "bet_hedger_slow", 
+                   winter_list = var_climate, startpop = var_pop, direction = 0.01)
+fast_var_bh = Run_Program(model_name = "bet_hedger_fast", 
+                   winter_list = var_climate, startpop = var_pop, direction =  0.1)
+neg_var_bh  = Run_Program(model_name = "bet_hedger_negative", 
+                   winter_list = var_climate, startpop = var_pop, direction = -0.1)
 
 
 '''running all additional models'''
 
-plast_in_var.run()
-var_in_plast.run()
-step_plastic.run()
-step_bh.run()
-slow_plastic.run()
-fast_plastic.run()
-slow_var.run()
-fast_var.run()
-neg_plastic.run()
-neg_var.run()
-
+slow_pred_plastic.run()
+fast_pred_plastic.run()
+neg_pred_plastic.run()
+slow_pred_bh.run()
+fast_pred_bh.run()
+neg_pred_bh.run()
+slow_var_plastic.run()
+fast_var_plastic.run()
+neg_var_plastic.run()
+slow_var_bh.run()
+fast_var_bh.run()
+neg_var_bh.run()
 
 '''
 climate = []
