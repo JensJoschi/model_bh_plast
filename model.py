@@ -5,6 +5,16 @@ Created on Mon Oct  7 13:45:18 2019
 @author: Jens
 """
 
+''' to do list
+directional change environment( ind.redirect())
+currently a flat reaction norm at 0.1 means that probability to be NOT in diapause 
+is 0.9; 0.9^2; 0.9^3... 0.9^t --> even with flat reaction norm cumulative probability goes 
+towards 1 quickly. this is unrealistic, because a multivoltine organism gets only ~ 5 decisions 
+to diapuase, not 50
+testing!
+check save and output functions
+'''
+
 '''
 The model simulates the trade-off between investment in growth and in reproduction 
 in unpredictable and changing conditions.
@@ -56,21 +66,15 @@ import copy
 import os
 
 '''classes'''
-class Individual (object):
-    '''creates individual with 4 reaction norm properties.
+class Individual(object):
+    ''' same as class individuum, but reaction norm not restricted to logit shape'''
     
-    reaction norm is given by p(diap) = c + (d-c)/(1+math.exp(-b*(t-e))) with b =slope,
-    c,d = lower and upper limit, e = inflection point'''
-    
-    def __init__(self,b,c,d,e): #all float
-        self.b = b #-inf to +inf, though values > |5| carry little meaning
-        self.c = c #0 to 1
-        self.d = d #0 to 1, though should generally be >c
-        self.e = e #- inf to +inf, expected ~ 25
+    def __init__(self,p_list = []):
+        self.p_list = p_list if p_list else [
+                numpy.random.uniform(0,0.1) for i in range(50)]
         
-    def __str__ (self):
-        x = f"slope: {self.b:.3f} lower limit: {self.c:.3f} upper limit: {self.d:.3f} midpoint: {self.e:.3f}"
-        return (x)
+    def __str__(self):
+        return(str(self.p_list)) 
     
     def reproduce(self, r): 
         '''reproduces the individual r times
@@ -78,29 +82,65 @@ class Individual (object):
         r = 4.2 will return a list with 4 individuals in 80% of all cases, and with 5
         individuals in the remaining 20% of all cases. expected input: r = float > 0'''
         n = math.floor(r) + numpy.random.binomial(1, r- math.floor(r),1)[0]
-        return( [Individual(self.b ,self.c, self.d, self.e) for i in range(0,n)] )
-    
-    def check_diap (self, t):
-        '''test for diapause given individual's reaction norm shape and t'''
-        exponent = max(min(-self.b * (t - self.e), 500),-500)
-        # extreme values can occur for t >1000 in models using climate_neg(l. 315)
-        return( self.c + (self.d-self.c)/(1+math.exp(exponent)) )
+        return( [copy.deepcopy(self) for i in range(0,n)] )  
+             
+    def mutate(self, mut_frac):
+       '''induces mutations in the individual's reaction norm'''
+         
+       self.p_list = [i if (random.uniform(0,1) > mut_frac) else 
+                     random.choice([0,random.uniform(0,1),1]) for i in self.p_list]
+       #mutations make each loci 0, 1, or a random draw between 0 and 1
+    def cumprob (self):
+        x = numpy.cumprod([1-i for i in self.p_list]) #cumulative probability to be NOT in diapause
+        return([1-i for i in x]) #cum prob to be in diapause
         
-    def var_comps(self, t_max):
+    def pars(self):
         ''' calculate variance among and within environments
-        
+
+        is done on cumulative probability of being in diapause
         var_within = sum p*(1-p) / n
         var_ax.mong = sd^2 / n'''
+        p = self.cumprob()
+        p2 =[i * (1-i) for i in p]
+ 
+        i = 0
+        mp = False
+        while not mp:
+            if p[i] > max(p)/2:
+                mp = i
+            i = i + 1
+        among = numpy.std(p, ddof=1)
+        within = numpy.mean(p2) 
+        return([mp, among, within]) 
+    
+    def redirect(self):
+        #will eventually be used for directional change in environment
+        pass
+
+ 
+
+class Ind_logit (Individual):
+    '''creates individual with 4 reaction norm properties.
+    
+    reaction norm is given by p(diap) = c + (d-c)/(1+math.exp(-b*(t-e))) with b =slope,
+    c,d = lower and upper limit, e = inflection point'''
+    
+    def __init__(self, b=[], c=[], d =[], e = [], t = 50): #all float
+        self.b = random.uniform(0,10) if b == [] else b
+        self.c = random.uniform(0,1)  if c == [] else c
+        self.d = random.uniform(self.c,1)if d == [] else d 
+        self.e = random.uniform(0,50) if e == [] else e
         
-        probability = []
-        p2 = []
-        for t in range(t_max):
-            prob = round(self.check_diap(t),4)
-            probability.append(prob)
-            p2.append(prob * (1-prob))       
-        self.among = numpy.std(probability, ddof=1)
-        self.within = numpy.mean(p2)    
+        self.p_list = []
+        for i in range(t): #calculate diapause given b,c,d,e
+            exponent = max(min(-self.b * (i - self.e), 500),-500)
+        # extreme values can occur for t >1000 in models using climate_neg
+            self.p_list.append(self.c + (self.d-self.c)/(1+math.exp(exponent)))
         
+    def __str__ (self):
+        x = f"slope: {self.b:.3f} lower limit: {self.c:.3f} upper limit: {self.d:.3f} midpoint: {self.e:.3f}"
+        return (x)
+     
     def mutate(self, mut_frac):
        '''induces mutations in the individual's reaction norm'''
        self.b = self.b if random.uniform(0,1) > mut_frac else \
@@ -113,39 +153,38 @@ class Individual (object):
             random.uniform(self.c,1)     #c<d<1
        self.e = self.e if random.uniform(0,1) > mut_frac else \
             random.uniform(0,50)
-    
 
+        
+        
 class Run_Program(object):
     '''run the model'''
-    def __init__ (self, model_name = "generic", max_year = 10000,  popsize = 1000,
-                  winter_list = [],  startpop = [], severity = 1, winter_mut = 1/10000,
-                 t_max = 50,growth_rate = 0.8, direction = 0, saving =True):
+    def __init__ (self, model_name = "generic", max_year = 10000, winter_list = [],
+                  severity = 1, startpop = [], direction = 0, saving =True, cont = True,
+                  popsize = 1000, winter_mut = 1/10000, t_max = 50, growth_rate = 0.8):
         '''saves parameters and creates starting population'''
         
         self.model_name = model_name
         self.max_year = max_year
-        self.popsize = popsize #population size at start of the year
         self.winter_list = winter_list
-        
         self.severity = severity #penalty if not being dormant after winter arrival 
+        self.startpop = startpop
+        self.direction  = direction #climate change in days/year.
+        #this will actually not change the climate data, but the mean of the reaction 
+        #norms of all individuals
+        self.saving = saving
+        self.popsize = popsize #population size at start of the year
         self.winter_mut = winter_mut 
         self.t_max = t_max
         self.growth_rate = growth_rate #no offspring for each time step in which
         #the individual is not dormant; e.g. 0.5, dormancy at day 25 --> 12.5 offspring
-        self.all_results = []
-        self.startpop = startpop
+        self.model = "Individual" if cont else "Ind_logit"
+        self.fitness_list = []
+        self.details_list = []
+        
         self.eggs = startpop
-        self.direction  = direction #climate change in days/year.
-        self.saving = saving
-        #this will actually not change the climate data, but the mean of the reaction 
-        #norms of all individuals
         if not self.eggs:
-            for i in range(self.popsize):
-                b = random.gauss(1,3)
-                c = random.uniform(0,0.5)
-                d= random.uniform(0.5,1)
-                e = random.gauss(25, 5)
-                self.eggs.append(Individual(b,c,d,e))
+            self.eggs = [eval(self.model+"()") for i in range(self.popsize)]
+            #produces popsize individuals, either of class Individual or of class Ind_logit
                 
         if not winter_list:
             self.winter_list = [(self.t_max/2) for i in range(self.max_year)]
@@ -171,10 +210,12 @@ class Run_Program(object):
             random.sample(self.eggs, self.popsize)   
             if awake_list:
                 for individual in self.eggs:
-                    individual.e = individual.e - self.direction
+                #    individual.redirect(self.direction)
                     individual.mutate(self.winter_mut)
                 self.eggs = self.runyear(awake_list, w_on)        
-              #  self.all_results.append(self.save_all(self.eggs))
+                self.fitness_list.append(len(self.eggs))
+                if self.saving:
+                    self.details_list.append(self.save_details())
                 yc +=1
                 if not yc % 100: 
                     print(".", end = '')
@@ -184,20 +225,6 @@ class Run_Program(object):
                 extinct_at = yc
         if extinct_at:
             print ("Population extinct in year", extinct_at)
-        if self.saving:
-            os.mkdir(self.model_name)
-            numpy.save(os.path.join(os.getcwd(), self.model_name, self.model_name),
-                       self.all_results) #model name twice to make generic.npy in subfolder "generic"
-            for i in range(5):
-                fig = self.plot_all(i)
-                fig[0].figure.savefig(os.path.join(os.getcwd(), self.model_name, 
-                   str(i) + ".png"))
-            numpy.save(os.path.join(os.getcwd(), self.model_name, "climate"), 
-                       self.winter_list)
-            numpy.save(os.path.join(os.getcwd(), self.model_name, "startpop"), 
-                       self.startpop)
-            #add parameters
-
         return(yc)
         
     def runyear(self, curr_list, end):
@@ -211,59 +238,84 @@ class Run_Program(object):
         for t in range(self.t_max):
             gr = self.growth_rate * t 
             newlist = []
-            if (curr_list and not (t > end and severe_bool)):
+            if (curr_list and not (t > end and severe_bool)):#if there are non-diapausing
+                #individuals left, and winter either did not arrive yet or is not severe:
                 for individual in curr_list:
-                    diapausing = bool(numpy.random.binomial(1,individual.check_diap(t)))
+                    diapausing = bool(numpy.random.binomial(1,individual.p_list[t]))
                     if diapausing:
                         diapause_list.extend(individual.reproduce(gr))
                     else: 
                         newlist.append(individual)
             curr_list = newlist
+        if not severe_bool: #make sure everyone who survives gets to diapause at end of season
+            diapause_list.extend([individual.reproduce(gr) for individual in curr_list])
         return(diapause_list)      
 
     
-    def save_all (self, eggs):
-        '''Saves reaction norm properties of offspring'''
-        x = numpy.zeros((len(eggs),4))
-        t= 0
-        for individual in eggs:
-            x[t,:] = [round(individual.b*3)/3, round(individual.c*20)/20, 
-             round(individual.d*20)/20, round(individual.e)]
-            t = t+ 1
+    def save_details (self):
+        eggs = random.sample(self.eggs,min(len(self.eggs),100))
+        x = [individual.pars() for individual in eggs]
+        mp =[]
+        among=[]
+        within=[]
+        for i in x:
+            mp.append(i[0])
+            among.append(round(i[1],2))
+            within.append(round(i[2],2))
 
-        b_un = numpy.unique(x[:,0], return_counts=  True)
-        c_un = numpy.unique(x[:,1], return_counts=  True)
-        d_un = numpy.unique(x[:,2], return_counts=  True)
-        e_un = numpy.unique(x[:,3], return_counts=  True)
-        result = [b_un[0], c_un[0], d_un[0], e_un[0], 
-                  b_un[1],c_un[1], d_un[1], e_un[1]]
+        mp_un = numpy.unique(mp, return_counts=  True)
+        among_un = numpy.unique(among, return_counts=  True)
+        within_un = numpy.unique(within, return_counts=  True)
+ 
+        result = [mp_un[0], among_un[0], within_un[0], 
+                  mp_un[1], among_un[1], within_un[1]]
         return (result)
 
     def plot_all (self, to_plot=0):
-        lablist = ["slope","lower limit", "upper limit", "midpoint", "survivors"]
-        ax = [10,1,1,40,0] 
+        lablist = ["midpoint","among", "within", "fitness"]
+        ax = [50,1,1,0] 
         x = []
         y = []
-        if to_plot <4:
-            for i in range(len(self.all_results)):
-                x.append (self.all_results[i][to_plot])
-                y.append (self.all_results[i][to_plot+4])
+        if to_plot <3:
+            for i in range(len(self.details_list)):
+                x.append (self.details_list[i][to_plot])
+                y.append (self.details_list[i][to_plot+3])
         else:
-            for i in range(len(self.all_results)):
-                x.append(sum(self.all_results[i][4]))
-            ax[4] = max(x)
+            x = self.fitness_list
+            ax[3] = max(x)
         fig = plt.plot([])
         plt.ylabel(lablist[to_plot])
         plt.title(self.model_name)
-        plt.axis([0, len(self.all_results), 0 ,ax[to_plot]])
+        plt.axis([0, len(self.fitness_list), 0 ,ax[to_plot]])
         if to_plot <3:    
-            for i in numpy.arange(0,len(self.all_results),int(self.max_year/100)):
+            for i in numpy.arange(0,len(self.fitness_list),int(self.max_year/100)):
                 plt.scatter(numpy.full((len(x[i])),i), x[i], c = sum(y[i])/y[i], 
                         cmap = "Blues_r", s =10, marker = "s")
         else:
             plt.plot(x)
         plt.close()
         return(fig)
+
+
+    def save_data(self):
+        os.mkdir(self.model_name)
+        numpy.save(os.path.join(os.getcwd(), self.model_name, self.model_name),
+                       self.fitness_list) #model name twice to make generic.npy in subfolder "generic"
+        numpy.save(os.path.join(os.getcwd(), self.model_name, "climate"), 
+                       self.winter_list)
+        numpy.save(os.path.join(os.getcwd(), self.model_name, "startpop"), 
+                       self.startpop)
+        fig = self.plot_all(3)
+        fig[0].figure.savefig(os.path.join(os.getcwd(), self.model_name, 
+                 "fitness.png"))
+        if self.saving:
+            numpy.save(os.path.join(os.getcwd(), self.model_name, self.model_name),
+                       self.details_list)
+            for i in range(3):
+                fig = self.plot_all(i)
+                fig[0].figure.savefig(os.path.join(os.getcwd(), self.model_name, 
+                   str(i) + ".png"))
+                
 
 '''functions'''
 def make_pop(model, popsize):
@@ -287,22 +339,29 @@ def make_climate(mu =25, sigma = 0, trend = 0, n = 20000):
     return(climate)
 
     
+plasticity = Run_Program(max_year = 1000, saving =False, model_name ="plastic") 
+plasticity.run()
 
-'''start models '''  
+print ("bet-hedging.")
 var_climate = make_climate(sigma = 4, n = 10000)
+bet_hedging = Run_Program(max_year = 10000, saving =False, winter_list =var_climate,
+                          model_name = "bh")
+#bet_hedging.run()
 
-predictable= Run_Program(model_name = "Predictable_climate")
-variable = Run_Program(model_name = "Unpredictable", 
-                       winter_list = var_climate)
 
 '''
-predictable.run() 
-variable.run() 
+p_mild = Run_Program(max_year =2000, saving =False, severity = 0.3, model_name = "p_mild")
+p_mild.run()
+
+bh_mild = Run_Program(max_year = 2000, saving =False, winter_list =var_climate,
+                      severity = 0.3, model_name = "bh_mild")
+bh_mild.run()
 '''
+
 
 '''environments and climates for further models'''
-plast_pop = make_pop(predictable, 1000)
-var_pop = make_pop(variable, 1000)
+#plast_pop = make_pop(plasticity, 1000)
+#var_pop = make_pop(bet_hedging, 1000)
 
  
 
