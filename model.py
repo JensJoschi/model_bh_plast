@@ -7,38 +7,37 @@ Created on Mon Oct  7 13:45:18 2019
 
 ''' to do list
 directional change environment( ind.redirect())
-currently a flat reaction norm at 0.1 means that probability to be NOT in diapause 
-is 0.9; 0.9^2; 0.9^3... 0.9^t --> even with flat reaction norm cumulative probability goes 
-towards 1 quickly. this is unrealistic, because a multivoltine organism gets only ~ 5 decisions 
-to diapuase, not 50
 testing!
-check save and output functions
+check save and output functions - needs rework, new "cumprod" function. the output should not be
+based on reaction norm shape, but on actual individual phenotype distribution
 '''
 
 '''
 The model simulates the trade-off between investment in growth and in reproduction 
-in unpredictable and changing conditions.
+under unpredictable and changing conditions.
 An individual is allowed to grow until it makes the irreversible decision to start 
 dormancy, upon which its resources are converted into offspring. The longer it grows, 
 the higher the number of offspring; but when winter arrives, all non-dormant individuals
 die. If winter onset is unpredictable, there is a trade-off between high (arithmetic) 
 mean growth rate and survival. 
 
-A starting population has *popsize* individuals. Each individual has a different
-genotype with four properties (*b,c,d,e* = slope, lower limit, upper limit, midpoint), 
-which determine logistic reaction norm shape in response to *t* (time, e.g. day length). 
-This reaction norm determines the probability of dormancy as function of time. 
-While non-dormant, the individual grows linearly with a growth rate of *growth_rate*. Upon
-deciding for dormancy, the resources are converted into offspring, at the rate
+A starting population has *popsize* individuals. There are *t_max* (50) time steps, 
+and each individual receives 5 random opportunities *gentime* per year to start 
+diapausing. This simulates 5 non-overlapping generations of a multivoltine species,
+and no synchronisation among individuals.  
+Each individual has 50 properties (*p_list*), which determine reaction norm 
+shape of dormancy in response to *t* (time, e.g. day length). While non-dormant, 
+the individual grows linearly with a growth rate of *growth_rate*. Upon deciding 
+for dormancy, the resources are converted into offspring, at the rate 
 *growth_rate* \* *t*. The offspring inherit the same genotype, except for the possibilty 
 of mutations with a rate of *mut_rate*. The offspring will remain dormant until the 
 next year.
 Winter onset *t_on* is drawn for a normal distribution with mean *mu_float* and 
-standard deviation *sigma_float*. When *t* reaches *t_on*, the growth rate 
-is set to 0 (except for models that include winter severity, see below), i.e. the 
-individual dies. When *t* reaches *t_max* the year is over and the seed bank 
-replaces the population. If the seed bank is larger than *popsize*, 
-*popsize* individuals are randomly drawn from the seed bank.
+standard deviation *sigma_float*. When *t* reaches *t_on*, the individual loses 
+the opportunity to diapause and reproduce, i.e. it dies (except if winter is not 
+severe, see below). 
+When the year is over the seed bank  replaces the population. If the seed bank is larger 
+than *popsize*, *popsize* individuals are randomly drawn from the seed bank.
 If winter onset is predictable (standard deviation = 0), the reaction
 norm is expected to evolve a steep slope (plasticity), inducing dormancy just before 
 mean winter onset. If the standard deviation is high (winter unpredictable), the
@@ -67,7 +66,7 @@ import os
 
 '''classes'''
 class Individual(object):
-    ''' same as class individuum, but reaction norm not restricted to logit shape'''
+    ''' Creates an individuum with a reaction norm shape determined by 50 parameters'''
     
     def __init__(self,p_list = []):
         self.p_list = p_list if p_list else [
@@ -90,7 +89,8 @@ class Individual(object):
        self.p_list = [i if (random.uniform(0,1) > mut_frac) else 
                      random.choice([0,random.uniform(0,1),1]) for i in self.p_list]
        #mutations make each loci 0, 1, or a random draw between 0 and 1
-    def cumprob (self):
+    def cumprob (self):   
+        #x = 1- numpy.cumprod (1-(p_i * 0.2)) 
         x = numpy.cumprod([1-i for i in self.p_list]) #cumulative probability to be NOT in diapause
         return([1-i for i in x]) #cum prob to be in diapause
         
@@ -212,6 +212,8 @@ class Run_Program(object):
                 for individual in self.eggs:
                 #    individual.redirect(self.direction)
                     individual.mutate(self.winter_mut)
+                    individual.gentime = [ 
+                    round(random.uniform(0,4)) + i for i in range(0,self.t_max,5)]
                 self.eggs = self.runyear(awake_list, w_on)        
                 self.fitness_list.append(len(self.eggs))
                 if self.saving:
@@ -227,29 +229,24 @@ class Run_Program(object):
             print ("Population extinct in year", extinct_at)
         return(yc)
         
-    def runyear(self, curr_list, end):
+    def runyear(self, curr_list, winter):
         '''on each day, every Individual may enter diapause; if awake, it reproduces
         
         input: list of individuals; number of days until winter onset
         output: offspring from those indivdiduals that made it to dormancy before winter'''
-        diapause_list = []
+        survivor_list = []
         severe_bool = bool(numpy.random.binomial(1,self.severity)) #is winter severe?
         #if winter is not severe, it does not have an effect of life history
-        for t in range(self.t_max):
-            gr = self.growth_rate * t 
-            newlist = []
-            if (curr_list and not (t > end and severe_bool)):#if there are non-diapausing
-                #individuals left, and winter either did not arrive yet or is not severe:
-                for individual in curr_list:
-                    diapausing = bool(numpy.random.binomial(1,individual.p_list[t]))
-                    if diapausing:
-                        diapause_list.extend(individual.reproduce(gr))
-                    else: 
-                        newlist.append(individual)
-            curr_list = newlist
-        if not severe_bool: #make sure everyone who survives gets to diapause at end of season
-            diapause_list.extend([individual.reproduce(gr) for individual in curr_list])
-        return(diapause_list)      
+        for individual in curr_list:
+            diapausing = False
+            for t in individual.gentime:
+                if not diapausing and bool(numpy.random.binomial(1,individual.p_list[t])):
+                    diapausing = True
+                    if t < winter or not severe_bool:
+                        survivor_list.extend(individual.reproduce(self.growth_rate * t))
+            if not severe_bool: #make sure everyone who survives gets to diapause at end of season
+                survivor_list.extend(individual.reproduce(self.growth_rate * t))
+        return(survivor_list)
 
     
     def save_details (self):
@@ -339,9 +336,28 @@ def make_climate(mu =25, sigma = 0, trend = 0, n = 20000):
     return(climate)
 
     
-plasticity = Run_Program(max_year = 1000, saving =False, model_name ="plastic") 
+plasticity = Run_Program(max_year = 100, saving =False, model_name ="plastic") 
 plasticity.run()
+indlist = random.sample(plasticity.eggs, 10)
+for i in indlist:
+    plt.plot(i.p_list)
+plt.close()
 
+p2 = Run_Program(max_year = 3000, saving = False, model_name = "p2", startpop = plasticity.eggs)
+'''
+p2.run()
+indlist = random.sample(p2.eggs, 10)
+for i in indlist:
+    plt.plot(i.p_list)
+plt.close()
+
+p3 = Run_Program(max_year = 6000, saving = False, model_name = "p3", startpop = p2.eggs)
+p3.run()
+indlist = random.sample(p3.eggs, 10)
+for i in indlist:
+    plt.plot(i.p_list)    
+plt.close()
+'''
 print ("bet-hedging.")
 var_climate = make_climate(sigma = 4, n = 10000)
 bet_hedging = Run_Program(max_year = 10000, saving =False, winter_list =var_climate,
