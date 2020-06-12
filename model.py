@@ -8,20 +8,22 @@ Created on Mon Oct  7 13:45:18 2019
 '''
 In this model we consider a haploid genotype that faces the decision 
 to produce one of two phenotypes (P1 and P2) under uncertain environmental 
-conditions. A reaction norm determines the proportion of p2 in response to a cue c. 
-An environment E can take two discrete states (E1 and E2); the probability 
-of E2 is a logistic function of c, p(c) = 1/(1 + exp(-k(c-c0)). In this function the
-midpoint c0 determines the frequency of E2, and the slope k determines how well the
-cue c predicts the change in environments.
-The fitness of P1 is 2.2 in E1, but zero in E2, while the fitness of P2 is 1 
+conditions. A reaction norm determines the proportion of P2 in response to a cue c. 
+An environment E can take two discrete states (E1 and E2) and the probability of 
+E2 occuring is correlated to c. To do so, we model E2 as a logistic function,
+p(c) = 1/(1 + exp(-k(c-c0)). The midpoint c0 thus determines the threshold of c 
+that induces a switch towards E2 (i.e. the frequency of E2 across environmental cues),
+while the slope k determines how well c predicts E2. 
+The fitness of P1 is 3 in E1, but zero in E2, while the fitness of P2 is 1 
 regardless of environmental conditions. 
 
 A starting population has *popsize* individual genotypes that vary in reaction 
-norm shapes. At each time 5 environmental cues and according environments are 
+norm shapes to c. In each time step 5 environmental cues and according environments are 
 created. Ten individuals per genotype and environment are allowed to chose phenotypes
-according to their reaction norm shape and the cues, and the geometric mean
-fitness across the 5 environments is calculated. The genotype then reproduces with 
-an offspring number equal to the average geometric mean fitness of the 10 individuals. 
+according to their reaction norm shape and c, and their arithmetic mean fitness is
+calculated. Then the geometric mean fitness of the genotype is calculated, based on 
+average fitness in each of the 5 environments. The genotype reproduces with 
+an offspring number equal to this geometric mean fitness. 
 
 The offspring inherit the same genotype as their mother, except 
 for the possibility of mutations with a rate of *mut_rate*. In the next time step 
@@ -42,8 +44,6 @@ in a favorable environemnt and persists. So while there is a reasonable chance
 for extinction, some genotypes get lucky and spread quickly, leading to high genotype
 turnover but no evolution.
 
-
-something is wrong with gr
 '''
 
 import random
@@ -111,16 +111,13 @@ class Run_Program(object):
                   popsize = 1000, mut_rate = 1/1000,
                   individuals = 10, environments = 5,
                   gr = numpy.array([[3,1],[0,1]])):
-        #correpsonds to [[environment], [phenotype]]
-        #for insect diapause: summer, nondiapausing = 3; summer diapasuing = 1
-        #winter nondiapausing = 0, winter diapausing  = 1
-                 
-        self.testlist=[]
+
         '''saves parameters and creates starting population'''
         
         self.model_name = model_name
-        self.max_year = max_year
-        self.saving = saving
+        self.max_year = max_year #number of time steps
+        self.saving = saving #boolean: should details of reaction norms be saved at 
+        #each time step?
         self.env = env #probability of E2 occuring: 
         #p(c) = 1/(1 + exp(-env[1] * (c-env[0])))
         #environments change on average at cue c = env[0]
@@ -130,11 +127,15 @@ class Run_Program(object):
         self.popsize = popsize #population size at start of the year
         self.mut_rate = mut_rate
         self.inds = individuals #replicates of the genotype
-        self.environments = environments
-        self.gr = gr
+        self.environments = environments #number of environments to which the genotype 
+        #is subjected in each time step
+        self.gr = gr #growth rates of the 2 phenotypes in the 2 environemnts
+        #correpsonds to [[environment], [phenotype]]
+        #sorting: [[E1 P1, E1 P2], [E2 P1, E2 P2]]
+        #e.g. insect diapause: [[summer, nondiapausing = 3; summer diapasuing = 1],
+        #[winter nondiapausing = 0, winter diapausing  = 1]]
 
-
-        self.fitness_list = []
+        self.fitness_list = [] #stores no. survivors per time step
         self.details_list = []
         
         self.eggs = startpop
@@ -157,7 +158,7 @@ class Run_Program(object):
     def run(self):
         print("\nmodel: ", self.model_name, "\nRunning. 1 dot = 100 years")
        
-        yc = 1
+        yc = 1 #saves year of extinction, if applicable
         extinct_at = []
           
         for i in range(0, self.max_year): 
@@ -187,30 +188,22 @@ class Run_Program(object):
         return(yc)
         
     def runyear(self, curr_list):
-        '''docstring needed'''
-        def expon(x):
+        '''subject 10 instances of each genotype to 5 environments and calculate fitness'''
+        def expon(x): #function to create Environment based on c
             return(1/(1+math.exp(-self.env[1] * (x-self.env[0]))))
         offspring_list = []
         for genotype in curr_list:
-            geom_list =[]
+            geom_list =[] #stores arithmetic mean fitness in each of the 5 environments
             for i in range(self.environments):
                 c = random.choice(range(10))
                 E = numpy.random.binomial(1,expon(c),1)[0] #0 in summer, 1 in winter
                 arm_list = [self.gr[E,int(genotype.phenotype(c))] for 
                                      k in range(self.inds)] #chooses phenotype 
-                #for 10 individuals and calculates their arithmetic mean 
-                #fitness
-               # print (arm_list)
-                geom_list.append(numpy.mean(arm_list)) # puts 
-                # arithmetic mean of these 10 individuals into a list to calc their 
-                #geom across the environments
-            #print(geom_list)
-           # print("Fitness: ", numpy.exp(numpy.mean(numpy.log(geom_list))))
+                #for 10 individuals and calculates their arithmetic mean fitness
+                geom_list.append(numpy.mean(arm_list))
             offspring_list.extend(genotype.reproduce(
                     numpy.exp(numpy.mean(numpy.log(geom_list))) #calculates geom
                     ))
-            self.testlist.append(numpy.exp(numpy.mean(numpy.log(geom_list))))
-            #print ("total", len(offspring_list),"\n")
         return(offspring_list)
 
     
@@ -288,15 +281,9 @@ def plot_over_time(model, variable=0):
     plt.plot(mean)
 
 
-
-startpop = [Genotype([numpy.random.uniform(0,1) for i in range(10)]) for i in range(1000)]
-# startpop adjusted due to high risk for extinction 
-
-plasticity = Run_Program(max_year = 1000, env = [4.5,20], startpop = startpop)
-#plasticity.run()
-bethedging = Run_Program(max_year = 10000, env = [4.5,1], startpop = startpop)
-#bethedging.run() 
-
+''''
+#testing whether program works as intended: single genotype with no mutations in 
+all sorts of environments
 c1  = Genotype([0 for i in range(10)]).reproduce(1000) #growth throughout season
 c2  = Genotype([1 for i in range(10)]).reproduce(1000) #instant diapause
 dbh = Genotype([0.5 for i in range(10)]).reproduce(1000) #50% of each under all conditions
@@ -373,6 +360,16 @@ dbhpp.extend(Genotype([0,0,0,0,0,1,1,1,1,1]).reproduce(500))
 comp = Run_Program(max_year = 1000, env = [4.5, 0], mut_rate = 0, 
                                 startpop = dbhpp, model_name ="grower")
 comp.run() #rapid increase to just above 1000 (bethedgers only)
+
+'''
+
+startpop = [Genotype([numpy.random.uniform(0,1) for i in range(10)]) for i in range(1000)]
+# startpop adjusted due to high risk for extinction 
+
+plasticity = Run_Program(max_year = 1000, env = [4.5,20], startpop = startpop)
+#plasticity.run()
+bethedging = Run_Program(max_year = 10000, env = [4.5,1], startpop = startpop)
+#bethedging.run() 
 
 '''
 n = 10000
