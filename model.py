@@ -108,9 +108,9 @@ class Run_Program(object):
     '''run the model'''
     def __init__ (self, model_name = "generic", max_year = 10000, saving =True, 
                   env = [5,3], startpop = [],
-                  popsize = 1000, mut_rate = 1/1000,
+                  popsize = 500, mut_rate = 1/1000,
                   individuals = 10, environments = 5,
-                  gr = numpy.array([[3,1],[0,1]])):
+                  gr = numpy.array([[4,1],[0,1]])):
 
         '''saves parameters and creates starting population'''
         
@@ -281,95 +281,15 @@ def plot_over_time(model, variable=0):
     plt.plot(mean)
 
 
-''''
-#testing whether program works as intended: single genotype with no mutations in 
-all sorts of environments
-c1  = Genotype([0 for i in range(10)]).reproduce(1000) #growth throughout season
-c2  = Genotype([1 for i in range(10)]).reproduce(1000) #instant diapause
-dbh = Genotype([0.5 for i in range(10)]).reproduce(1000) #50% of each under all conditions
-pp  = Genotype([0,0,0,0,0,1,1,1,1,1]).reproduce(1000) # diapause timing
+startpop = [Genotype([numpy.random.uniform(0,1) for i in range(10)]) for i in range(500)]
 
-print ("strategies in summer")
-c1_in_summer = Run_Program(max_year = 50, env = [12, 20], mut_rate = 0, 
-                                startpop = c1, model_name ="grower")
-c2_in_summer = Run_Program(max_year = 50, env = [12, 20], mut_rate = 0, 
-                                startpop = c2, model_name ="diapauser")
-plastic_in_summer = Run_Program(max_year = 50, env = [12, 20], mut_rate = 0, 
-                                startpop = pp, model_name ="plastic, summer")
-dbh_in_summer= Run_Program(max_year = 50, env = [12, 20], mut_rate = 0, 
-                            startpop = dbh, model_name = "dbh, summer")
+v0 = Run_Program(max_year = 5000, env = [4.5,20] , startpop = startpop)
+v1 = Run_Program(max_year = 5000, env = [4.5,0.8], startpop = startpop)
+v2 = Run_Program(max_year = 5000, env = [4.5,0]  , startpop = startpop)
 
-
-c1_in_summer.run() #constant at 3000
-c2_in_summer.run() #constant at 1000
-plastic_in_summer.run() # constant at ~ 1800
-dbh_in_summer.run() #constant at ~ 2000
-
-
-print ("strategies in winter")
-c1_in_winter = Run_Program(max_year = 50, env = [0, 20], mut_rate = 0, 
-                                startpop = c1, model_name ="grower")
-c2_in_winter = Run_Program(max_year = 50, env = [0, 20], mut_rate = 0, 
-                                startpop = c2, model_name ="diapauser")
-
-c1_in_winter.run() #instant extinction
-c2_in_winter.run() #constant at 1000
-
-print ("strategies in predictable climates")
-c1_in_predictable = Run_Program(max_year = 50, env = [4.5, 20], mut_rate = 0, 
-                                startpop = c1, model_name ="grower")
-c2_in_predictable = Run_Program(max_year = 50, env = [4.5, 20], mut_rate = 0, 
-                                startpop = c2, model_name ="diapauser")
-plastic_in_predictable = Run_Program(max_year = 50, env = [4.5, 20], mut_rate = 0, 
-                                startpop = pp, model_name ="plastic, predictable")
-dbh_in_predictable = Run_Program(max_year = 50, env = [4.5, 20], mut_rate = 0, 
-                            startpop = dbh, model_name = "dbh, predictable")
-
-c1_in_predictable.run() #nearly instant extinction
-c2_in_predictable.run() #constant at 1000
-plastic_in_predictable.run() #constant at  ~ 1800
-dbh_in_predictable.run() #constant at just above 1000
-
-print ("strategies in variable climates")
-c1_in_variable = Run_Program(max_year = 100, env = [4.5, 0], mut_rate = 0, 
-                                startpop = c1, model_name ="grower")
-c2_in_variable = Run_Program(max_year = 100, env = [4.5, 0], mut_rate = 0, 
-                                startpop = c2, model_name ="diapauser")
-plastic_in_variable = Run_Program(max_year = 100, env = [4.5, 0], mut_rate = 0, 
-                                startpop = pp, model_name ="plastic, variable")
-dbh_in_variable = Run_Program(max_year = 100, env = [4.5, 0], mut_rate = 0, 
-                            startpop = dbh, model_name = "dbh, variable")
-
-c1_in_variable.run() #instant extinction
-c2_in_variable.run() #constant at 1000
-plastic_in_variable.run() #instant extinciton
-dbh_in_variable.run() #constant at just above 1000; this means that dbh and 
-#cbh provide nearly the same fitness
-
-print ("mix in variable")
-specmix = Genotype([0 for i in range(10)]).reproduce(500)
-specmix.extend(Genotype([1 for i in range(10)]).reproduce(500))
-
-specmix_in_variable = Run_Program(max_year = 100, env = [4.5, 0], mut_rate = 0, 
-                                startpop = specmix, model_name ="grower")
-specmix_in_variable.run() #rapid drop to 500 (cbh only)
-
-dbhpp = Genotype([0.5 for i in range(10)]).reproduce(500)
-dbhpp.extend(Genotype([0,0,0,0,0,1,1,1,1,1]).reproduce(500))
-
-comp = Run_Program(max_year = 1000, env = [4.5, 0], mut_rate = 0, 
-                                startpop = dbhpp, model_name ="grower")
-comp.run() #rapid increase to just above 1000 (bethedgers only)
-
-'''
-
-startpop = [Genotype([numpy.random.uniform(0,1) for i in range(10)]) for i in range(1000)]
-# startpop adjusted due to high risk for extinction 
-
-plasticity = Run_Program(max_year = 1000, env = [4.5,20], startpop = startpop)
-#plasticity.run()
-bethedging = Run_Program(max_year = 10000, env = [4.5,1], startpop = startpop)
-#bethedging.run() 
+v0.run()
+v1.run()
+v2.run()
 
 '''
 n = 10000
