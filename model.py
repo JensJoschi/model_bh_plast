@@ -9,12 +9,12 @@ Created on Mon Oct  7 13:45:18 2019
 In this model we consider a haploid genotype that faces the decision 
 to produce one of two phenotypes (P1 and P2) under uncertain environmental 
 conditions. A reaction norm determines the proportion of P2 in response to a cue c. 
-An environment E can take two discrete states (E1 and E2) and the probability of 
-E2 occuring is correlated to c. To do so, we model E2 as a logistic function,
+The cue c is also related to an environment E, which can take two discrete states 
+(E1 and E2). We model the probability of E2 as a logistic function to c,
 p(c) = 1/(1 + exp(-k(c-c0)). The midpoint c0 thus determines the threshold of c 
 that induces a switch towards E2 (i.e. the frequency of E2 across environmental cues),
 while the slope k determines how well c predicts E2. 
-The fitness of P1 is 3 in E1, but zero in E2, while the fitness of P2 is 1 
+The fitness of P1 is 4 in E1, but zero in E2, while the fitness of P2 is 1 
 regardless of environmental conditions. 
 
 A starting population has *popsize* individual genotypes that vary in reaction 
@@ -79,8 +79,7 @@ class Genotype(object):
          
        self.p_list = [i if (random.uniform(0,1) > mut_frac) else 
                       random.uniform(0,1) for i in self.p_list]
-       #alternative: random.choice([0,random.uniform(0,1),1]) for i in self.p_list]
-       #mutations make each loci 0, 1, or a random draw between 0 and 1
+
     def phenotype (self, c):
         return(bool(numpy.random.binomial(1,self.p_list[c],1)[0]))
         
@@ -130,13 +129,12 @@ class Run_Program(object):
         self.environments = environments #number of environments to which the genotype 
         #is subjected in each time step
         self.gr = gr #growth rates of the 2 phenotypes in the 2 environemnts
-        #correpsonds to [[environment], [phenotype]]
         #sorting: [[E1 P1, E1 P2], [E2 P1, E2 P2]]
         #e.g. insect diapause: [[summer, nondiapausing = 3; summer diapasuing = 1],
         #[winter nondiapausing = 0, winter diapausing  = 1]]
 
         self.fitness_list = [] #stores no. survivors per time step
-        self.details_list = []
+        self.details_list = [] #stores reaction norm shape at each time step
         
         self.eggs = startpop
         if not self.eggs:
@@ -189,8 +187,10 @@ class Run_Program(object):
         
     def runyear(self, curr_list):
         '''subject 10 instances of each genotype to 5 environments and calculate fitness'''
+        
         def expon(x): #function to create Environment based on c
             return(1/(1+math.exp(-self.env[1] * (x-self.env[0]))))
+            
         offspring_list = []
         for genotype in curr_list:
             geom_list =[] #stores arithmetic mean fitness in each of the 5 environments
@@ -218,22 +218,44 @@ class Run_Program(object):
             within.append(round(i[2],2))
         return([mp, among, within])
    
+    def plot_over_time(self, variable=0):
+        ylist = ["Midpoint", "Var_among", "Var_within"]
+        mean = [numpy.mean(self.details_list[i][variable]) for i in range(len(
+            self.details_list))]
+        sd = [numpy.std(self.details_list[i][variable]) for i in range(len(
+            self.details_list))]
+        upper = [mean[i]+sd[i] for i in range(len(mean))]
+        lower = [mean[i]-sd[i] for i in range(len(mean))]
+        plt.rcParams['font.size']=14
+        Fig = plt.plot(mean, 'ks-', linewidth = 2.0)
+        plt.ylabel(ylist[variable], fontsize= 14)
+        plt.xlabel("Time", fontsize= 14)
+        plt.plot(upper, color = "grey", linestyle = "dashed")
+        plt.plot(lower, color = "grey", linestyle = "dashed")
+        return (Fig)
+
     def save_data(self):
         os.mkdir(self.model_name)
         numpy.save(os.path.join(os.getcwd(), self.model_name, self.model_name),
                        self.fitness_list) #model name twice to make generic.npy in subfolder "generic"
         numpy.save(os.path.join(os.getcwd(), self.model_name, "startpop"), 
                        self.startpop)
-        fig = self.plot_all(3)
+        plt.rcParams['font.size']=14
+        fig = plt.plot(self.fitness_list, 'bs-.', linewidth = 2.0)
+        plt.ylabel("Population size", fontsize= 18)
+        plt.xlabel("Time", fontsize= 18)
+        
         fig[0].figure.savefig(os.path.join(os.getcwd(), self.model_name, 
                  "fitness.png"))
+        plt.close()
         if self.saving:
             numpy.save(os.path.join(os.getcwd(), self.model_name, self.model_name),
                        self.details_list)
             for i in range(3):
-                fig = self.plot_all(i)
+                fig = self.plot_over_time(i)
                 fig[0].figure.savefig(os.path.join(os.getcwd(), self.model_name, 
                    str(i) + ".png"))
+                plt.close()
                 
 
 '''functions'''
@@ -273,60 +295,81 @@ def plot_summary(model_array, variable = 0):
                 c = sum(val_n)/val_n, cmap = "Blues_r", s = 10, marker="s")
     
 
-def plot_over_time(model, variable=0):
-    mean = [numpy.mean(model.details_list[i][variable]) for i in range(len(
-            model.details_list))]
-    sd = [numpy.std(model.details_list[i][variable]) for i in range(len(
-            model.details_list))]
-    plt.plot(mean)
-
 
 startpop = [Genotype([numpy.random.uniform(0,1) for i in range(10)]) for i in range(500)]
 
-v0 = Run_Program(max_year = 5000, env = [4.5,20] , startpop = startpop)
-v1 = Run_Program(max_year = 5000, env = [4.5,0.8], startpop = startpop)
-v2 = Run_Program(max_year = 5000, env = [4.5,0]  , startpop = startpop)
+v0 = Run_Program(max_year = 5000, env = [4.5,20] , startpop = startpop, saving = True, 
+                 model_name = "plastic")
+v1 = Run_Program(max_year = 5000, env = [4.5,0.8], startpop = startpop, saving = True,
+                 model_name = "intermediate")
+v2 = Run_Program(max_year = 5000, env = [4.5,0]  , startpop = startpop, saving = True,
+                 model_name = "dbh")
+v3 = Run_Program(max_year = 5000, env = [2.5,20]  , startpop = startpop, saving = True,
+                 model_name = "early")
+v4 = Run_Program(max_year = 5000, env = [4.5,20]  , startpop = startpop, saving = True,
+                 gr = numpy.array([[4,1],[2,1]]), model_name ="canalized")
 
-v0.run()
-v1.run()
-v2.run()
+
+
+#v0.run() #population size stabilizes at ~ 1000
+#steep slope between c = 4 and c =5, from 0 to 100; few mutations on other loci
+#v1.run() #750
+#slope between 0 and 6
+#v2.run() #550
+#reaction norms flat
+#v3.run() #expectation: same as v0 but earlier midpoint
+#v4.run() #expectation: percent diapause never decreases below 0.8 or something similar
+
+
+plt.plot(v0.fitness_list)
+for i in range(20):
+    plt.plot(v0.eggs[random.choice(range(500))].p_list, 'b-')
+    plt.plot(v1.eggs[random.choice(range(500))].p_list, 'r--')
+    plt.plot(v2.eggs[random.choice(range(500))].p_list, 'g-.')
+    plt.plot(v3.eggs[random.choice(range(500))].p_list, 'k--')
+    plt.plot(v4.eggs[random.choice(range(500))].p_list, 'bs')
+
+v5 = Run_Program(max_year = 5000, env = [4.5,0.8]  , startpop = startpop, saving = True,
+                 gr = numpy.array([[4,0],[0,4]]), model_name ="switched")
+#v5.run()
+
+
+
+all_results = []
+c0_list = [2.5, 3, 4.5]
+k_list = [0, 8 , 20]
+P1_list = [0, 2, 3]
+for i in c0_list:
+    for j in k_list:
+        for k in P1_list:
+            row = []
+            for l in range(5):
+                 x = Run_Program(max_year = 1000, env = [i,j] , 
+                            startpop = startpop, saving = True,
+                            gr = numpy.array([[4,1],[k,1]]),                 
+                            model_name = str(i) + "-" + str(j) + "-" + str(k))
+                 x.run()
+                 x.save_data()
+                 row.append(x)
+            all_results.append(row)
+
+
 
 '''
-n = 10000
-outcomes = []
+mps_m = []
+mps_sd = []
+for i in range(27):
+        mps_m.append([numpy.mean(all_results[i][j].details_list[4][0]) for j in range(5)])
+        mps_sd.append([numpy.std(all_results[i][j].details_list[4][0]) for j in range(5)])
+
+x = [i for i in range(5)]
+plt.plot(x, mps_m[0], "bo")
+lower = [mps_m[0][i] - mps_sd[0][i] for i in range(5)]
+upper = [mps_m[0][i] + mps_sd[0][i] for i in range(5)]
 for i in range(5):
-    outcomes.append(Run_Program(max_year = n, saving = True, model_name = "sigma"+
-                                str(i/2), winter_list = make_climate(mu = 15,
-                                        sigma =i/2, n = n), gr_awake=3))
-    #outcomes[i].run()
-
-outcomes[0] = Run_Program(max_year = n, saving = True, model_name = "sigma_inf",
-                                winter_list = make_climate(mu = 15,
-                                        sigma =5, n = n), gr_awake=3)
-outcomes[0].run()
-#outcomes[4].run()
-#plot_3d(outcomes[0].details_list[0])
-plot_over_time(outcomes[0])
-plot_over_time(outcomes[1])
-plot_over_time(outcomes[2])
-plot_over_time(outcomes[3])
-plot_over_time(outcomes[4])
-plt.title("Evolution of midpoint")
-plt.legend([0,0.5,1,1.5,2])
-
-
-plot_over_time(outcomes[0],1)
-plot_over_time(outcomes[1],1)
-plot_over_time(outcomes[2],1)
-plot_over_time(outcomes[3],1)
-plot_over_time(outcomes[4],1)
-plt.title("Evolution of var_among")
-plt.legend([0,0.5,1,1.5,2])
-
-
-'''
-
-
+    plt.plot([x[i], x[i]], [upper[i], lower[i]])
+    '''
+    
 '''
 l = []
 for i in range(1000):
@@ -349,27 +392,4 @@ ax.set_zlabel('Midpoint(m)')
 results = numpy.array(test.details_list)
 r = numpy.mean(results, axis=2)
 plt.plot(r[:,0])
-
-
-
-test.details_list[0]
-n=[]
-for i in range(len(test.details_list)):
-    n.append(numpy.argmax(test.details_list[i][3]))
-    
-m = [test.details_list[i][0][n[i]] for i in range(len(test.details_list))]
-
-n=[]
-for i in range(len(test.details_list)):
-    n.append(numpy.argmax(test.details_list[i][4]))
-a = [test.details_list[i][1][n[i]] for i in range(len(test.details_list))]
-
-
-variable =0
-for i in range(len(test.details_list)):
-    results = test.details_list[i]
-    val_y = results[variable]
-    val_n = results[variable+3]
-    plt.scatter(numpy.full(len(val_y),i), val_y, 
-                c = sum(val_n)/val_n, cmap = "Blues_r", s = 10, marker="s")
 '''
