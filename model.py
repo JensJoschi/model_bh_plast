@@ -212,14 +212,21 @@ class Run_Program(object):
         mp =[]
         among=[]
         within=[]
+        ratio = []
+        varsum =[]
         for i in x:
             mp.append(i[0])
-            among.append(round(i[1],2))
-            within.append(round(i[2],2))
-        return([mp, among, within])
+            am = round(i[1],2)
+            wi = round(i[2],2)
+            among.append(am)
+            within.append(wi)
+            ratio.append(am/(am+wi) )
+            varsum.append(am+wi)
+        return([mp, among, within, ratio, varsum])
    
     def plot_over_time(self, variable=0):
-        ylist = ["Midpoint", "Var_among", "Var_within"]
+        ylist = ["Midpoint", "Var_among", "Var_within", "ratio", "sum"]
+        yl =[[0,10], [0,0.5], [0,0.25], [0,1], [0, 0.75]]
         mean = [numpy.mean(self.details_list[i][variable]) for i in range(len(
             self.details_list))]
         sd = [numpy.std(self.details_list[i][variable]) for i in range(len(
@@ -229,6 +236,7 @@ class Run_Program(object):
         plt.rcParams['font.size']=14
         Fig = plt.plot(mean, 'ks-', linewidth = 2.0)
         plt.ylabel(ylist[variable], fontsize= 14)
+        plt.ylim(yl[variable])
         plt.xlabel("Time", fontsize= 14)
         plt.plot(upper, color = "grey", linestyle = "dashed")
         plt.plot(lower, color = "grey", linestyle = "dashed")
@@ -251,7 +259,7 @@ class Run_Program(object):
         if self.saving:
             numpy.save(os.path.join(os.getcwd(), self.model_name, self.model_name),
                        self.details_list)
-            for i in range(3):
+            for i in range(5):
                 fig = self.plot_over_time(i)
                 fig[0].figure.savefig(os.path.join(os.getcwd(), self.model_name, 
                    str(i) + ".png"))
@@ -297,7 +305,7 @@ def plot_summary(model_array, variable = 0):
 
 
 startpop = [Genotype([numpy.random.uniform(0,1) for i in range(10)]) for i in range(500)]
-
+'''
 v0 = Run_Program(max_year = 5000, env = [4.5,20] , startpop = startpop, saving = True, 
                  model_name = "plastic")
 v1 = Run_Program(max_year = 5000, env = [4.5,0.8], startpop = startpop, saving = True,
@@ -311,14 +319,14 @@ v4 = Run_Program(max_year = 5000, env = [4.5,20]  , startpop = startpop, saving 
 
 
 
-#v0.run() #population size stabilizes at ~ 1000
+v0.run() #population size stabilizes at ~ 1000
 #steep slope between c = 4 and c =5, from 0 to 100; few mutations on other loci
-#v1.run() #750
+v1.run() #750
 #slope between 0 and 6
-#v2.run() #550
+v2.run() #550
 #reaction norms flat
-#v3.run() #expectation: same as v0 but earlier midpoint
-#v4.run() #expectation: percent diapause never decreases below 0.8 or something similar
+v3.run() #expectation: same as v0 but earlier midpoint
+v4.run() #expectation: percent diapause never decreases below 0.8 or something similar
 
 
 plt.plot(v0.fitness_list)
@@ -331,44 +339,125 @@ for i in range(20):
 
 v5 = Run_Program(max_year = 5000, env = [4.5,0.8]  , startpop = startpop, saving = True,
                  gr = numpy.array([[4,0],[0,4]]), model_name ="switched")
-#v5.run()
-
+v5.run()
+'''
 
 
 all_results = []
-c0_list = [2.5, 3, 4.5]
-k_list = [0, 8 , 20]
-P1_list = [0, 2, 3]
+#c0_list = [2.5, 3, 4.5]
+c0_list = [4.5]
+k_list = [0, 0.8 , 20]
+P1_list = [0, 0.5, 1.5]
 for i in c0_list:
     for j in k_list:
         for k in P1_list:
             row = []
-            for l in range(5):
-                 x = Run_Program(max_year = 1000, env = [i,j] , 
+            for l in range(1):
+                 x = Run_Program(max_year = 2000, env = [i,j] , 
                             startpop = startpop, saving = True,
                             gr = numpy.array([[4,1],[k,1]]),                 
-                            model_name = str(i) + "-" + str(j) + "-" + str(k))
+                            model_name = str(i) + "-" + str(j) + "-" + str(k)+"-" + str(l))
                  x.run()
                  x.save_data()
                  row.append(x)
             all_results.append(row)
 
 
-
 '''
-mps_m = []
-mps_sd = []
-for i in range(27):
+mps_m = [numpy.mean(all_results[i][0].details_list[499][0]) for i in range(9)]
+mps_sd = [numpy.std(all_results[i][0].details_list[499][0]) for i in range(9)]
+among_m = [numpy.mean(all_results[i][0].details_list[499][1]) for i in range(9)]
+among_sd = [numpy.std(all_results[i][0].details_list[499][1]) for i in range(9)]
+within_m = [numpy.mean(all_results[i][0].details_list[499][2]) for i in range(9)]
+within_sd = [numpy.std(all_results[i][0].details_list[499][2]) for i in range(9)]
+'''
+
+models = [[0,3,6], [1,4,7], [2,5,8]]
+xnames = ('unpredictable', 'intermediate', 'predictable')
+groupnames =  ('high amplitude', 'intermediate', 'low amplitude')
+
+def plotbarplot(models, xnames, groupnames, variable = 0):
+    ylabs = ['Midpoint', 'variance among', 'variance within', "ratio", "sum"]
+    N = len (models)
+    ind = numpy.arange(N)
+    width = 1/(1+N)
+    data= []
+    bars = []
+    for i in range(N):
+        temp = [numpy.mean(all_results[models[i][j]][0].details_list[499][variable]) for j \
+                in range(len(models[i]))]
+        temp2 = [numpy.std(all_results[models[i][j]][0].details_list[499][variable]) for j \
+                in range(len(models[i]))]
+        data.append(temp)
+        bars.append(temp2)
+    
+    fig, ax = plt.subplots()
+    w = 0
+    group =[]
+    for i in range(N):
+        g = ax.bar(ind + w, tuple(data[i]), width, yerr = bars[i])
+        group.append(g)
+        w = w + width
+    ax.set_ylabel(ylabs[variable])
+    ax.set_xticks(ind + width / 2)
+    ax.set_xticklabels(xnames)
+    ax.legend(group, groupnames)
+
+for i in range(20):
+    plt.plot(all_results[0][0].eggs[random.choice(range(500))].p_list, 'b-')
+    plt.plot(all_results[1][0].eggs[random.choice(range(500))].p_list, 'orange')
+    plt.plot(all_results[2][0].eggs[random.choice(range(500))].p_list, 'green')
+plt.title("Reaction norms in unpredictable environments")
+plt.xlabel("Environmental cue c")
+plt.ylabel ("Probability of P2")
+
+
+for i in range(20):
+    plt.plot(all_results[6][0].eggs[random.choice(range(500))].p_list, 'b-')
+    plt.plot(all_results[7][0].eggs[random.choice(range(500))].p_list, 'orange')
+    plt.plot(all_results[8][0].eggs[random.choice(range(500))].p_list, 'green')
+plt.title("Reaction norms in predictable environments")
+plt.xlabel("Environmental cue c")
+plt.ylabel ("Probability of P2")
+'''
+for i in range(9):
         mps_m.append([numpy.mean(all_results[i][j].details_list[4][0]) for j in range(5)])
         mps_sd.append([numpy.std(all_results[i][j].details_list[4][0]) for j in range(5)])
 
-x = [i for i in range(5)]
-plt.plot(x, mps_m[0], "bo")
+ksp1 = [18,21,24]
+ksp2 = [19, 22, 25]
+ksp3 = [20, 23, 26]
+
+x =  [i/5 for i in range(5)]
+for mod in range(len(ksp1)):
+    curr = ksp1[mod]
+    lower = [mps_m[curr][i] - mps_sd[curr][i] for i in range(5)]
+    upper = [mps_m[curr][i] + mps_sd[curr][i] for i in range(5)]
+    for i in range(5):
+        plt.plot([x[i], x[i]], [upper[i], lower[i]], "b-")
+    plt.plot (x, mps_m[curr], "bo")
+    curr = ksp2[mod]
+    lower = [mps_m[curr][i] - mps_sd[curr][i] for i in range(5)]
+    upper = [mps_m[curr][i] + mps_sd[curr][i] for i in range(5)]
+    for i in range(5):
+        plt.plot([x[i], x[i]], [upper[i], lower[i]], "g-")
+    plt.plot (x, mps_m[curr], "go")
+    curr = ksp3[mod]
+    lower = [mps_m[curr][i] - mps_sd[curr][i] for i in range(5)]
+    upper = [mps_m[curr][i] + mps_sd[curr][i] for i in range(5)]
+    for i in range(5):
+        plt.plot([x[i], x[i]], [upper[i], lower[i]], "y-")
+    plt.plot (x, mps_m[curr], "yo")
+    x = [i + 10 for i in x]
+
+plt.ylabel("Midpoint", fontsize= 18)
+plt.xlabel ("environmental variance")
+#x axis is categorical now, remove labels
+    
 lower = [mps_m[0][i] - mps_sd[0][i] for i in range(5)]
 upper = [mps_m[0][i] + mps_sd[0][i] for i in range(5)]
-for i in range(5):
-    plt.plot([x[i], x[i]], [upper[i], lower[i]])
-    '''
+'''
+    
     
 '''
 l = []
