@@ -6,43 +6,53 @@ Created on Mon Oct  7 13:45:18 2019
 """
 
 '''
-In this model we consider a haploid genotype that faces the decision 
-to produce one of two phenotypes (P1 and P2) under uncertain environmental 
-conditions. A reaction norm determines the proportion of P2 in response to a cue c. 
-The cue c is also related to an environment E, which can take two discrete states 
-(E1 and E2). We model the probability of E2 as a logistic function to c,
-p(c) = 1/(1 + exp(-k(c-c0)). The midpoint c0 thus determines the threshold of c 
-that induces a switch towards E2 (i.e. the frequency of E2 across environmental cues),
-while the slope k determines how well c predicts E2. 
-The fitness of P1 is 4 in E1, but zero in E2, while the fitness of P2 is 1 
-regardless of environmental conditions. 
+This model explores the costs and limits of reaction norm evolution (costs and limits
+of phenotypic plasticity, bet-hedging and canalization). 
+The scenario is the same as in Joschinski & Bonte, Frontiers in Ecology and Evolution 2020.
 
-A starting population has *popsize* individual genotypes that vary in reaction 
-norm shapes to c. In each time step 5 environmental cues and according environments are 
-created. Ten individuals per genotype and environment are allowed to chose phenotypes
-according to their reaction norm shape and c, and their arithmetic mean fitness is
-calculated. Then the geometric mean fitness of the genotype is calculated, based on 
-average fitness in each of the 5 environments. The genotype reproduces with 
-an offspring number equal to this geometric mean fitness. 
+In short, we consider a haploid genotype that faces the decision to produce one 
+of two phenotypes (P1 and P2) under uncertain environmental conditions. 
+An environment E can take two discrete states (E1 and E2), and the change in environmental 
+state (such as onset of winter) is imperfectly correlated to a cue c:
+The change in E is normally distributed and the mean timing of environmental change
+corresponds to c = 5 with a standard deviation sigma; thus the cumulative probability 
+function of the normal distribution describes the probability of E2 given a cue c
+(e.g. with sigma = 1: the probability of E2 is 0.5 when is c = 5, 0.84 for c = 6, and 0.999 for c = 8).
+The genotype determines a reaction norm, which describes the proportion of P2 
+in response to c, without knowing E directly.
 
-The offspring inherit the same genotype as their mother, except 
-for the possibility of mutations with a rate of *mut_rate*. In the next time step 
-the offspring replace the current population. If there are more than *popsize* offspring, 
-*popsize* genotypes are randomly drawn from the seed bank. 
+A starting population has 3000 individual genotypes that vary in reaction 
+norm shapes to c (c ranges from 0 to 10 in arbitrary units). In each time step 
+one environmental cue is chosen and an according environment is created. For example, 
+a cue c = 6 may be chosen, which may correspond to a probability of E2 = 0.84 
+(depending on sigma); the environment is hence likely to be E2 in this year. 
+The same cue c is presented to all genotypes, which then choose phenotypes for their 
+offspring according to their reaction norm shape. We initially assume that each 
+genotype has 100 individual offspring that can react to c. For example, the genotype's 
+reaction norm may determine that 60% of the offspring shall be of type P2 at c = 6. 
+Around 60 of the offspring will thus be P2, and 40 will be P1 (because these are 
+probabilities, the exact number of offspring varies).
+All phenotypes are then subjected to the same E (E2 in the example) and the fitness
+is calculated. In the standard scenario the fitness of P1 is 4 in E1, but zero in E2, 
+while the fitness of P2 is 1 regardless of environmental conditions. The genotype
+fitness is calculated as the arithmetic mean fitness of the offspring.
+In the example the environment was E2, so about 40 offspring have 0 fitness (P1 in E2), while
+60 offspring have 1 fitness (P2 in E2), i.e. the average fitness is 0.6. In another year
+with c = 6 the environment may turn out E1 (with 16% probability), and the fitness would
+be (40 * 4 + 60 * 1)/100 = 2.2
 
- The model runs for 2000 time steps, after which population size and reaction norm 
+Before the next year starts the genotypes reproduce with a growth rate that equals
+their fitness. The reaction norms may mutate with a probability of 1/1000 in the process. 
+In the next time step the reproduced genotypes replace the current population. If the
+available genotypes exceed the population size (3000), a random sample equalling the 
+populatoin size is drawn from the pool of available genotypes. 
+
+The model runs for 2000 time steps, after which population size and reaction norm 
  parameters (Var_among, var_within, mean) are recorded.
+ 
+ We will change the fitness functions in various runs and additionally impose 
+ constraints on the reaction norm shape as well as on the environmental conditions.
 
-explanation of var among + within needed. ref to preprint as soon as available
-
-todo:
-    midpoint makes little sense if rn is not logistic
-    
-it should be theoretically possible to only have 1 environment per time step, but 
-unless the genotype is completely wrong, one of the 10 individuals often ends up
-in a favorable environemnt and persists. So while there is a reasonable chance
-for extinction, some genotypes get lucky and spread quickly, leading to high genotype
-turnover but no evolution.
 
 '''
 
@@ -52,6 +62,7 @@ import math
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import scipy
+from scipy import stats
 import copy
 import os
 
@@ -59,18 +70,23 @@ import os
 class Genotype(object):
     ''' Creates an individuum with a reaction norm shape determined by 10 parameters'''
     
-    def __init__(self,p_list = []):
+    def __init__(self,p_list = [], costs = [], costmag = []):
         self.p_list = p_list if p_list else [
                 numpy.random.uniform(0,1) for i in range(10)]
+    
         
     def __str__(self):
         return(str(self.p_list)) 
     
-    def reproduce(self, r): 
+    def reproduce(self, r, costs = [], costmag = []): 
         '''reproduces the genotype r times
         
         r = 4.2 will return a list with 4 individuals in 80% of all cases, and with 5
         individuals in the remaining 20% of all cases. expected input: r = float > 0'''
+        if costs: #for the moment these are only phenotypic variance costs
+            t = self.pars()
+            s = (t[1]+t[2])/0.25 #makes phenotypic variance go from 0-1            
+            r = r + r * costmag * s #positive costmag = benefit, negative = cost
         n = math.floor(r) + numpy.random.binomial(1, r- math.floor(r),1)[0]
         return( [copy.deepcopy(self) for i in range(0,n)] )  
              
@@ -94,16 +110,18 @@ class Genotype(object):
         among = numpy.std(p)**2
         within = numpy.mean(p2) 
         return([f, among, within]) 
- 
+    
+
         
         
 class Run_Program(object):
     '''run the model'''
-    def __init__ (self, model_name = "generic", max_year = 10000, saving =True, 
+    def __init__ (self, model_name = "generic", max_year = 1000, saving =False, 
                   env = [5,3], startpop = [],
-                  popsize = 500, mut_rate = 1/5000,
-                  individuals = 10, environments = 5,
-                  gr = numpy.array([[4,1],[0,1]])):
+                  popsize = 3000, mut_rate = 1/1000,
+                  replicates = 100,
+                  gr = numpy.array([[4,1],[0.1,1]]),
+                  costs = [], costmag = []):
 
         '''saves parameters and creates starting population'''
         
@@ -111,25 +129,25 @@ class Run_Program(object):
         self.max_year = max_year #number of time steps
         self.saving = saving #boolean: should details of reaction norms be saved at 
         #each time step?
-        self.env = env #probability of E2 occuring: 
-        #p(c) = 1/(1 + exp(-env[1] * (c-env[0])))
-        #environments change on average at cue c = env[0]
-        #env[1] determines whether the change in environments occurs always at env[0]
-        #(env[1] infinitely high), or is spread across all c (env[1] small)
+        self.env = env #mean and variance of the environment
         self.startpop = startpop
         self.popsize = popsize #population size at start of the year
         self.mut_rate = mut_rate
-        self.inds = individuals #replicates of the genotype
-        self.environments = environments #number of environments to which the genotype 
-        #is subjected in each time step
+        self.replicates = replicates #replicates of the genotype
         self.gr = gr #growth rates of the 2 phenotypes in the 2 environemnts
         #sorting: [[E1 P1, E1 P2], [E2 P1, E2 P2]]
         #e.g. insect diapause: [[summer, nondiapausing = 3; summer diapasuing = 1],
         #[winter nondiapausing = 0, winter diapausing  = 1]]
-
+        self.costs = costs #for the moment only phenotypic variance costs; later costs should be
+        #[], "s","r" or similar. negative costs are costs of phenotypic variance, positive
+        #values are benefits of variance/costs of canalization
+        self.costmag = costmag #can later be used for the magnitude of any cost now
+        #only phenotypic variance costs
+        
+        
         self.fitness_list = [] #stores no. survivors per time step
         self.details_list = [] #stores reaction norm shape at each time step
-        
+        self.sample_list = [] #stores a sample of 100 genotypes in each time step
         self.eggs = startpop
         if not self.eggs:
             self.eggs = [Genotype() for i in range(self.popsize)]
@@ -142,14 +160,14 @@ class Run_Program(object):
                 self.max_year, self.popsize, self.mut_rate))
         third_line = str("r: {:5.2f},{:5.2f},{:5.2f},{:5.2f}\n".format(
                 self.gr[0,0], self.gr[0,1], self.gr[1,0], self.gr[1,1]))
-        fourth_line = str('individuals: {:2}, environments: {:2}'.format(
-                self.inds, self.environments))
+        fourth_line = str('individuals: {:2}'.format(
+                self.replicates))
         return(first_line+ second_line+ third_line+ fourth_line)
         
         
     def run(self):
         '''wrapping method that runs the model, handles extinction, and saves output'''
-        print("\nmodel: ", self.model_name, "\nRunning. 1 dot = 100 years")
+        print("\nmodel: ", self.model_name, "\nRunning. 1 dot = 10 years")
        
         yc = 1 #saves year of extinction, if applicable
         extinct_at = []
@@ -163,11 +181,12 @@ class Run_Program(object):
                 self.eggs = self.runyear(alive_list)        
                 self.fitness_list.append(len(self.eggs))
                 if self.saving:
+                    self.sample_list.append(random.sample(self.eggs,min(len(self.eggs),100)))
                     self.details_list.append(self.save_rn(
                             random.sample(self.eggs,min(len(self.eggs),100))
                             ))
                 yc +=1
-                if not yc % 100: 
+                if not yc % 10: 
                     print(".", end = '')
             elif extinct_at:
                 pass
@@ -175,30 +194,29 @@ class Run_Program(object):
                 extinct_at = yc
         if extinct_at:
             print ("Population extinct in year", extinct_at)
+        print ("run complete. Saving.")
         self.results = numpy.array(self.save_rn(self.eggs))
         if self.saving:
             self.details_list = numpy.array(self.details_list)
         return(yc)
         
     def runyear(self, curr_list):
-        '''subject 10 instances of each genotype to 5 environments and calculate fitness'''
+        '''In every year an environment and according cue are created. Genotype survival
+        is tested against this environment
         
-        def expon(x): #function to create Environment based on c
-            return(1/(1+math.exp(-self.env[1] * (x-self.env[0]))))
-            
+        To reduce stochasticity due to Bernoulli variance, each genotype is replicated
+        100 times and the average fitness of these 100 genotypes (all receiving 
+        same environment and cue) is presented'''
+
+        c = random.choice(range(10))
+        e = stats.norm.cdf(c, self.env[0], self.env[1])
+        E = numpy.random.binomial(1,e,1)[0] #0 in summer, 1 in winter   
+        #these paramters are the same for every replicate and for every genotype!
         offspring_list = []
         for genotype in curr_list:
-            geom_list =[] #stores arithmetic mean fitness in each of the 5 environments
-            for i in range(self.environments):
-                c = random.choice(range(10))
-                E = numpy.random.binomial(1,expon(c),1)[0] #0 in summer, 1 in winter
-                arm_list = [self.gr[E,int(genotype.phenotype(c))] for 
-                                     k in range(self.inds)] #chooses phenotype 
-                #for 10 individuals and calculates their arithmetic mean fitness
-                geom_list.append(numpy.mean(arm_list))
-            offspring_list.extend(genotype.reproduce(
-                    numpy.exp(numpy.mean(numpy.log(geom_list))) #calculates geom
-                    ))
+            replicate_fitness = [self.gr[E,int(genotype.phenotype(c))] for r in range(self.replicates)]            
+            offspring_list.extend(genotype.reproduce(numpy.mean(replicate_fitness), 
+                                                     self.costs, self.costmag))
         return(offspring_list)
 
     
@@ -244,6 +262,8 @@ class Run_Program(object):
                        self.fitness_list) #model name twice to make generic.npy in subfolder "generic"
         numpy.save(os.path.join(os.getcwd(), self.model_name, "startpop"), 
                        self.startpop)
+        numpy.save(os.path.join(os.getcwd(), self.model_name, "results"), 
+                       self.results)
         plt.rcParams['font.size']=14
         fig = plt.plot(self.fitness_list, 'bs-.', linewidth = 2.0)
         plt.ylabel("Population size", fontsize= 18)
@@ -262,8 +282,82 @@ class Run_Program(object):
                 plt.close()
                 
 
-'''functions'''
+startpop = [Genotype([numpy.random.uniform(0,1) for i in range(10)]) for i in range(1000)]
 
+
+'''Phenotype-environment mismatch'''
+#bet-hedging should evolve under unpredictable conditions, and plasticity under predictable conditions.
+#these models shuold be very similar to the numerical approximation in Joschinski & Bonte, 
+#Frontiers in Ecology and Evolution
+
+test = Run_Program(model_name = "sd3",startpop = startpop, max_year = 100, env = [5,3], saving = True)
+test.run()
+test2 = Run_Program(model_name = "sd3",startpop = test.eggs, max_year = 400, env = [5,3], saving = True)
+#test2.run()
+test3 = Run_Program(model_name = "sd3",startpop = test2.eggs, max_year = 500, env = [5,3], saving = True)
+#test3.run()
+
+sigmas = [0.01,2,4,6,8,10,100]
+model_list =[]
+for i in range(6):
+    model_list.append(Run_Program(model_name = "sd_"+str(sigmas[i]), startpop = startpop,
+              env = [5, sigmas[i]]))
+    model_list[i].run()
+    model_list[i].save_data()
+
+#figure: change in mean frequencies with sd
+for i in range(6):
+    plt.plot(sigmas[i], numpy.mean(model_list[i].results[0]),  "bo")
+
+for i in range(6):
+    plt.plot( sigmas[i],numpy.mean(model_list[i].results[3]), "bo")
+ 
+           
+'''phenotype costs'''
+#here we assume that one of the phenotypes is more costly to produce, i.e. the growth rate
+#of either P1 or P2 is lowered. 
+
+#scenario #1: phenotype P2 is more costly to produce
+pc1_0 = Run_Program(model_name = "phenotype-costs_plastic",startpop = startpop, 
+        max_year = 1000, env = [5,0.01], saving = True, gr = numpy.array([[4,0.7],[0.1,0.7]]))
+pc1_5 = Run_Program(model_name = "phenotype-costs_dbh",startpop = startpop, 
+        max_year = 1000, env = [5,10], saving = True,gr = numpy.array([[4,0.7],[0.1,0.7]]))
+
+#scenario #2: P2 is more costly, but only in one environement
+
+pc2_0 = Run_Program(model_name = "phenotype-costs2_plastic",startpop = startpop, 
+        max_year = 1000, env = [5,0.01], saving = True, gr = numpy.array([[4,0.7],[0.1,1]]))
+pc2_5 = Run_Program(model_name = "phenotype-costs2_dbh",startpop = startpop, 
+        max_year = 1000, env = [5,10], saving = True,gr = numpy.array([[4,0.7],[0.1,1]]))
+
+#scenario #3: costs in the other environment
+pc3_0 = Run_Program(model_name = "phenotype-costs3_plastic",startpop = startpop, 
+        max_year = 1000, env = [5,0.01], saving = True, gr = numpy.array([[4,1],[0.1,0.7]]))
+pc3_5 = Run_Program(model_name = "phenotype-costs3_dbh",startpop = startpop, 
+        max_year = 1000, env = [5,10], saving = True,gr = numpy.array([[4,1],[0.1,0.7]]))
+
+#scenario 4: P1 is more costly (only one env here because it is already at zero in the other one)
+p4_0 = Run_Program(model_name = "phenotype-costs4_plastic",startpop = startpop, 
+        max_year = 1000, env = [5,0.01], saving = True, gr = numpy.array([[2.5,1],[0.1,1]]))
+p4_5 = Run_Program(model_name = "phenotype-costs4_dbh",startpop = startpop, 
+        max_year = 1000, env = [5,10], saving = True, gr = numpy.array([[2.5,1],[0.1,1]]))
+
+
+
+
+'''phenotypic variance costs'''
+#we now assume that either canalization or phenotypic variance incurs a cost. If 
+#phenotypic variance is ocstly, it does not matter whether the variance is due to
+#plasticity or due to diversified bet-hedging
+test2 = Run_Program(model_name = "costs",startpop = startpop, max_year = 100,
+                    env = [5,3], saving = True, costs = "lololo", costmag = -0.5)
+test2.run() #should go extinct nearly instantly
+test3 = Run_Program(model_name = "costs",startpop = startpop, max_year = 100, 
+                    env = [5,3], saving = True, costs = "lololo", costmag = -0.2)
+test3.run() #compare this to test further up. looks like canalization evolves
+
+'''functions'''
+'''these things are currently not in use'''
 def plot_3d (rn):
        f = rn[0] #mean
        s = rn[1]+rn[2] # sum, phenotypic variance
@@ -300,7 +394,7 @@ def plot_summary(model_array, variable = 0):
     
 
 
-startpop = [Genotype([numpy.random.uniform(0,1) for i in range(10)]) for i in range(500)]
+
 
 
 
@@ -329,222 +423,3 @@ for midpoints in c0_list:
                  row.append(x)
                  parm_list.append([midpoints,predictabilities, growth_rates])
             all_results.append(row)
-
-'''
-below are calculations that do not require an individual based model
-Growth in E1 and E2 are:
-GE1 = p * P1E1  + (1-p) * P2E1  and
-GE2 = p * P1E2 + (1-p) * P2E2,
-With PnEn representing the offspring numbers of each phenotype-environment combination, 
-and p representing the proportion of P2.
-
-
-Geom = GE1 ^ (f(E1)) * GE2 ^ (f(1-E1)) with f being the frequency of E1
-
-'''
-def geom (gr, f, p):
-    #g = numpy.array([E1P1,E1P2],[E2P1,E2P2]])
-    g = (gr[0,0] * p + (1-p) * gr[0,1])**(1-f)  * \
-    (gr[1,0] * p + (1-p) * gr[1,1])**f
-    return (g)
-
-x = [100-i for i in range(101)]
-gr = numpy.array([[4,1],[0,1]])
-y1 = [geom(gr,0.5,p/100) for p in range(101)]
-y2 = [geom(gr,0.2,p/100) for p in range(101)]
-
-plt.plot(x,y1)
-plt.plot(x,y2)
-plt.xlabel ("Proportion of P2")
-plt.ylabel ("Geometric mean fitness")
-
-#get optima
-n = numpy.array(y1)
-x1 = 100- numpy.where(n==max(y1))[0]
-n = numpy.array(y2)
-x2 = 100- numpy.where(n==max(y2))[0]
-plt.plot(x1, max(y1), "bo")
-plt.plot(x2, max(y2), color = "orange", marker = "o")
-
-
-
-
-x = numpy.linspace(-10,10,100)
-y = stats.norm.pdf(x, 0, 1)
-plt.plot(x,y)
-y2 = stats.norm.pdf(x,0,2)
-plt.plot(x,y2)
-y3 = stats.norm.pdf(x,0,3)
-plt.plot(x,y3)
-plt.xlabel ("Environmental cue c")
-plt.ylabel ("Probability of E2")
-
-
-x = numpy.linspace(-10,10,100)
-y = stats.norm.cdf(x, 0, 1)
-plt.plot(x,y)
-y2 = stats.norm.cdf(x,0,2)
-plt.plot(x,y2)
-y3 = stats.norm.cdf(x,0,3)
-plt.plot(x,y3)
-plt.xlabel ("Environmental cue c")
-plt.ylabel ("Cumulative Probability")
-
-def getrn (env, gr):
-    rn =[]
-    for f in env: #for every frequency that is dictated by the cue function
-        pvals = [geom(gr,f,p/100) for p in range(101)] #calculate geom of all possible proporitons
-        pn = numpy.array(pvals)
-        rn.append(100- numpy.where(pn==max(pvals))[0]) #save p with max(geom)
-    return(rn)
-    
-    
-plt.plot(x, getrn(y, gr))
-plt.plot(x, getrn(y2,gr))
-plt.plot(x, getrn(y3, gr))
-plt.xlabel ("Environmental cue c")
-plt.ylabel ("Proportion of P2")
-
-
-gr2 = gr = numpy.array([[4,1],[0.5,1]])
-plt.plot(x, getrn(y, gr2))
-plt.plot(x, getrn(y2,gr2))
-plt.plot(x, getrn(y3, gr2))
-plt.xlabel ("Environmental cue c")
-plt.ylabel ("Proportion of P2")
-
-
-
-def expon(x, k, x0): #function to create Environment based on c
-            return(1/(1+math.exp(-k * (x-x0))))
-            
-def fitness_function (gr, f_list):
-    #f_list = probability of winter for c = 0:10
-    optimum_list = []
-    for f in f_list:   
-        reslist = [(gr[0,0] * p + (1-p) * gr[0,1])**(1-f)  * (
-        gr[1,0] * p + (1-p) * gr[1,1])**f for p in numpy.linspace(0,1,101)]
-        R = numpy.array(reslist)
-        optimum_list.append(100 - numpy.where(R==max(reslist))[0])  #the p which has largest reslist entry
-    return(optimum_list)
- 
-#3 predictabilities for high amp environment; intermediate and low amplitude for intermediate predictability:
-pred = fitness_function(numpy.array([[4,1],[0,1]]), 
-        [expon(x, 20, 4.5) for x in range(10)])
-inter = fitness_function(numpy.array([[4,1],[0,1]]), 
-        [expon(x, 0.5, 4.5) for x in range(10)])
-unpred = fitness_function(numpy.array([[4,1],[0,1]]), 
-        [expon(x, 0, 4.5) for x in range(10)])
-med_amp = fitness_function(numpy.array([[4,1],[0.5,1]]), 
-        [expon(x, 0.5, 4.5) for x in range(10)])
-low_amp = fitness_function(numpy.array([[4,1],[0.5,1]]), 
-        [expon(x, 0, 4.5) for x in range(10)])
-neg_amp = fitness_function(numpy.array([[1.5,1],[0,1]]), 
-        [expon(x, 0.5, 4.5) for x in range(10)])
-
-plotnames= [pred, inter, unpred, med_amp, low_amp, neg_amp]
-for i in plotnames:
-    plt.plot(i)
-    
-gr = numpy.array([[4,1],[0,1]])
-x = [i for i in range(101,0, -1)]
-for i in range (10):
-    f = i/10
-    reslist = [(gr[0,0] * p + (1-p) * gr[0,1])**(1-f)  * (
-        gr[1,0] * p + (1-p) * gr[1,1])**f for p in numpy.linspace(0,1,101)]
-    plt.plot(x, reslist)
-    plt.xlabel ("p(P2)")
-    plt.ylabel ("Geometric mean fitness")
-    
-f = 0.5
-grlist  = [numpy.array([[4,1],[3 * i/10,1]] for i in range (10))]
-for i in range (10):
-    gr = numpy.array([[4,1],[3*i/10, 1]])
-    reslist = [(gr[0,0] * p + (1-p) * gr[0,1])**(1-f)  * (
-        gr[1,0] * p + (1-p) * gr[1,1])**f for p in numpy.linspace(0,1,101)]
-    plt.plot(x, reslist)
-    plt.xlabel ("p(P2)")
-    plt.ylabel ("Geometric mean fitness")
-'''
-def plotbarplot(models, grouping, xnames, groupnames, variable = 0):
-    ylabs = ['Frequency P2', 'variance among', 'variance within', "ratio", "sum"]
-    N = len (grouping)
-    nyear = len(models[0].details_list)
-    ind = numpy.arange(N)
-    width = 1/(1+N)
-    data= []
-    bars = []
-    
-
-    for i in range(N):
-        temp = [numpy.mean(models[grouping[i][j]].details_list[nyear-1][variable]) for j \
-                in range(len(grouping[i]))]
-        temp2 = [numpy.std(models[grouping[i][j]].details_list[nyear-1][variable]) for j \
-                in range(len(grouping[i]))]
-        data.append(temp)
-        bars.append(temp2)
-    
-    fig, ax = plt.subplots()
-    
-    w = 0
-    group =[]
-    for i in range(N):
-        g = ax.bar(ind + w, tuple(data[i]), width, yerr = bars[i])
-        group.append(g)
-        w = w + width
-    ax.set_ylabel(ylabs[variable])
-    ax.set_xticks(ind + width / 2)
-    ax.set_xticklabels(xnames)
-    ax.legend(group, groupnames)
-
-#plot r vs k
-c0sub = all_results[27:54]
-parsub = parm_list[27:54]
-
-s = [i[0] for i in c0sub if i[0].gr[0,0] == 4 ]
-
-grouping = [[0,3,6], [1,4,7], [2,5,8]]
-xnames = ('unpredictable', 'intermediate', 'predictable')
-groupnames =  ('P1E2 = 0', 'P1E2 = 0.5', 'P1E2 = 1.5')
-
-
-    
-for i in range(20):
-    plt.plot(all_results[0][0].eggs[random.choice(range(500))].p_list, 'b-')
-    plt.plot(all_results[1][0].eggs[random.choice(range(500))].p_list, 'orange')
-    plt.plot(all_results[2][0].eggs[random.choice(range(500))].p_list, 'green')
-plt.title("Reaction norms in unpredictable environments")
-plt.xlabel("Environmental cue c")
-plt.ylabel ("Probability of P2")
-
-
-for i in range(20):
-    plt.plot(all_results[6][0].eggs[random.choice(range(500))].p_list, 'b-')
-    plt.plot(all_results[7][0].eggs[random.choice(range(500))].p_list, 'orange')
-    plt.plot(all_results[8][0].eggs[random.choice(range(500))].p_list, 'green')
-plt.title("Reaction norms in predictable environments")
-plt.xlabel("Environmental cue c")
-plt.ylabel ("Probability of P2")
-
-
-
-all_symmetric = []
-#c0_list = [2.5, 3, 4.5]
-c0_list = [4.5]
-k_list = [0, 0.8 , 20]
-P1_list = [0, 0.5, 1.5]
-for i in c0_list:
-    for j in k_list:
-        for k in P1_list:
-            row = []
-            for l in range(1):
-                 x = Run_Program(max_year = 2000, env = [i,j] , 
-                            startpop = startpop, saving = True,
-                            gr = numpy.array([[4,k],[k,4]]),                 
-                            model_name = "symmetric_" +str(i) + "-" + str(j) + 
-                            "-" + str(k)+"-" + str(l))
-                 x.run()
-                 x.save_data()
-                 row.append(x)
-            all_symmetric.append(row)
-'''
