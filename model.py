@@ -71,20 +71,27 @@ class Genotype(object):
     def __init__(self,p_list = [], costs = [], costmag = []):
         self.p_list = p_list if p_list else [
                 numpy.random.uniform(0,1) for i in range(10)]
+        #probability of phenotype P2 as function of a cue c
     
         
     def __str__(self):
         return(str(self.p_list)) 
     
-    def reproduce(self, r, costs = [], costmag = []): 
+    def reproduce(self, r, costs = [], costmag = 0): 
         '''reproduces the genotype r times
         
         r = 4.2 will return a list with 4 individuals in 80% of all cases, and with 5
         individuals in the remaining 20% of all cases. expected input: r = float > 0'''
-        if costs: #for the moment these are only phenotypic variance costs
+        if costs == "s": #for the moment these are only phenotypic variance costs
             t = self.pars()
-            s = (t[1]+t[2])/0.25 #makes phenotypic variance go from 0-1            
-            r = r + r * costmag * s #positive costmag = benefit, negative = cost
+            c = (t[1]+t[2])/0.25 #makes phenotypic variance go from 0-1    
+        elif costs == "r":
+            t = self.pars()
+            c = t[1]/(t[1]+t[2]) #variance composition, goes from 0-1
+        else:
+            c = 0
+            
+        r = r + r * costmag * c 
         n = math.floor(r) + numpy.random.binomial(1, r- math.floor(r),1)[0]
         return( [copy.deepcopy(self) for i in range(0,n)] )  
              
@@ -96,6 +103,7 @@ class Genotype(object):
 
     def phenotype (self, c):
         return(bool(numpy.random.binomial(1,self.p_list[c],1)[0]))
+        #is phenotype of form P2?
         
     def pars(self):
         ''' calculate variance among and within environments
@@ -122,7 +130,7 @@ class Run_Program(object):
                   popsize = 3000, mut_rate = 1/1000,
                   replicates = 100,
                   gr = numpy.array([[4,1],[0,1]]),
-                  costs = [], costmag = []):
+                  costs = [], costmag = 0, costtype = "maintenance"):
 
         '''saves parameters and creates starting population'''
         
@@ -135,17 +143,24 @@ class Run_Program(object):
         self.popsize = popsize #population size at start of the year
         self.mut_rate = mut_rate
         self.replicates = replicates #replicates of the genotype
-        self.gr = gr #growth rates of the 2 phenotypes in the 2 environemnts
-        #sorting: [[E1 P1, E1 P2], [E2 P1, E2 P2]]
-        #e.g. insect diapause: [[summer, nondiapausing = 4; summer diapasuing = 1],
-        #[winter nondiapausing = 0, winter diapausing  = 1]]
+        
         self.costs = costs #for the moment only phenotypic variance costs; later costs should be
         #[], "s","r" or similar. negative costs are costs of phenotypic variance, positive
         #values are benefits of variance/costs of canalization
         self.costmag = costmag #can later be used for the magnitude of any cost now
         #only phenotypic variance costs
+        self.cost_type = costtype #"p1" will incur these costs only on phenotype P1, 
+            #"p2" on phenotype P2, "e1" only in environment 1 and "e2" only in E2; 
+            #"maintenance", "m" or any other term will incur the costs in any environment
+            #and independent of the phenotype
         
-        
+        self.gr = gr- gr * 0.5*self.costmag #growth rates of the 2 phenotypes in the 2 environemnts
+        #sorting: [[E1 P1, E1 P2], [E2 P1, E2 P2]]
+        #e.g. insect diapause: [[summer, nondiapausing = 4; summer diapasuing = 1],
+        #[winter nondiapausing = 0, winter diapausing  = 1]]
+        #for an average reaction norm (with e.g. intermediate phenotypic variance) 
+        #a cost of costmag/2 applies. This is substracted from growth rate here to 
+        #standardize (costfree have on average same growth rates)
         
         self.fitness_list = [] #stores no. survivors per time step
         self.details_list = [] #stores reaction norm shape at each time step
@@ -214,14 +229,34 @@ class Run_Program(object):
         c = random.choice(range(10))
         self.c_list.append(c)
         e = stats.norm.cdf(c, self.env[0], self.env[1])
-        E = numpy.random.binomial(1,e,1)[0] #0 in summer, 1 in winter   
+        E = numpy.random.binomial(1,e,1)[0] #0 in summer(E1), 1 in winter(E2)   
         #these paramters are the same for every replicate and for every genotype!
         self.e_list.append(E)
         offspring_list = []
         for genotype in curr_list:
-            replicate_fitness = [self.gr[E,int(genotype.phenotype(c))] for r in range(self.replicates)]            
-            offspring_list.extend(genotype.reproduce(numpy.mean(replicate_fitness), 
+            replicate_fitness =[]
+            for r in range(self.replicates):
+                phen = int(genotype.phenotype(c)) #this is 0 when phenotype P1 is
+                                                #chosen, and 1 for P2
+                f = self.gr[E,phen] 
+                if self.cost_type == "p1": 
+                    replicate_fitness.append(f + f * 2 * self.costmag * (1-int(phen))) 
+                elif self.cost_type == "p2":
+                    replicate_fitness.append(f + f * 2 * self.costmag * int(phen)) 
+                else: 
+                    replicate_fitness.append(f + f * self.costmag)
+                
+                
+            if self.cost_type =="e1":
+                offspring_list.extend(genotype.reproduce(numpy.mean(replicate_fitness), 
+                                                     self.costs, 2 * self.costmag*(1-E)))
+            elif self.cost_type =="e2":
+                offspring_list.extend(genotype.reproduce(numpy.mean(replicate_fitness), 
+                                                     self.costs, 2 * self.costmag*E))
+            else:
+                offspring_list.extend(genotype.reproduce(numpy.mean(replicate_fitness), 
                                                      self.costs, self.costmag))
+                
         return(offspring_list)
 
     
@@ -279,37 +314,29 @@ class Run_Program(object):
 
 
 '''functions'''              
-def plot_rns(results_list, mean, sigma, gr = numpy.array([[4,1],[0,1]])):
+def plot_rns(results_list, mean, sigma, gr = numpy.array([[3,1.25],[0,1.25]])):
     '''plots the evolved reaction norm shape
     
     results_list: list of suriviving genotypes; mean, sigma: mean and variance 
     of the environment (used for comparison with numerical calculations)'''
     
-    mean_list = [numpy.mean(res[:,i]) for i in range(10)]
-    sd_list = [numpy.std(res[:,i]) for i in range(10)]
+    mean_list = [numpy.mean(results_list[:,i]) for i in range(10)]
+    sd_list = [numpy.std(results_list[:,i]) for i in range(10)]
     plt.errorbar(range(10), mean_list, sd_list, 
                  linestyle='None', marker='^')
     #for comparison: what is expected from calculation
     c = numpy.linspace(0,9,1000)
     y = stats.norm.cdf(c, mean, sigma)
     rn =[get_opt(gr, f, accuracy =100) for f in y]
-    rn2 =[get_armopt(gr, f, accuracy =100) for f in y]
-    plt.plot(c,rn2, "k--" )
     plt.plot(c,rn)
 
     plt.ylabel("Proportion P2", fontsize= 14)
     plt.xlabel("c", fontsize= 14)
+    return(Genotype(mean_list).pars())
 
 def get_opt(gr, f, accuracy = 1000):  #function comes from frontiers script
     '''finds the offspring proportion that maximises the geometric mean'''
     y = [geom(gr,f,p/accuracy) for p in range(accuracy +1)]
-    n = numpy.array(y)
-    opt = numpy.where(n==max(y))[0][0] / (len(y)-1)
-    return(opt)
-    
-def get_armopt(gr, f, accuracy = 1000):  #function comes from frontiers script
-    '''finds the offspring proportion that maximises the geometric mean'''
-    y = [arm(gr,f,p/accuracy) for p in range(accuracy +1)]
     n = numpy.array(y)
     opt = numpy.where(n==max(y))[0][0] / (len(y)-1)
     return(opt)
@@ -325,14 +352,6 @@ def geom (gr, f, p): #function comes from frontiers script
     g = GE1**(1-f)  * (GE2)**f
     return (g)
     
-    
-def arm (gr, f, p):
-    '''calculates arithmetric mean fitness'''
-    GE1 = (1-p) * gr[0,0]  + p * gr[0,1]
-    GE2 = (1-p) * gr[1,0]  + p * gr[1,1]
-    g = GE1*(1-f)  + (GE2)*f
-    return (g)
-
 startpop = [Genotype([numpy.random.uniform(0,1) for i in range(10)]) for i in range(1000)]
 test = Run_Program(model_name = "sd3",startpop = startpop, max_year = 20, env = [5,3], saving = True)
 #test.run()
@@ -344,106 +363,100 @@ test = Run_Program(model_name = "sd3",startpop = startpop, max_year = 20, env = 
 
 sigmas = [0.01,2,100,2]
 model_list =[]
-gr_list = [numpy.array([[4,1],[0,1]]),numpy.array([[4,1],[0,1]]),
-           numpy.array([[4,1],[0,1]]),numpy.array([[4,1],[0.5,1]])]
+gr_list = [numpy.array([[3,1.25],[0,1.25]]),numpy.array([[3,1.25],[0,1.25]]),
+           numpy.array([[3,1.25],[0,1.25]]),numpy.array([[3,1.25],[0.5,1.25]])]
 
 for i in range(4):
     model_list.append(Run_Program(model_name = "model"+str(i)+"-sd_"+str(sigmas[i]), startpop = startpop,
-              env = [4.5, sigmas[i]],max_year = 2000, gr = gr_list[i]))
+              env = [4.5, sigmas[i]],max_year = 4000, gr = gr_list[i]))
     model_list[i].run()
     model_list[i].save_data()
 
 #data is saved here so that it does not have to be run again in case something in 
 #output changes
     
-model_names =  ["model"+str(i)+"-sd_"+str(sigmas[int(i)]) for i in range(4)]
-summary_list_m = [] #stores mean frequency across environments of all models
-summary_list_sd = [] #same but std
 
 #for each model:
-res = numpy.load("E:/model_bh_plast/sd_100/results.npy") 
-fig = plt.figure()
-plot_rns(res, 4.5, 2)
-fig.savefig("model_alt_gr")
-
-
-#to get summary statistics
-arr = numpy.array([Genotype(res[i].tolist()).pars() for i in range(len(res))])
-#conversion to class Genotype to calculate summary statistics
-summary_list_m.append(numpy.mean(arr[:,0]))
-summary_list_sd.append(numpy.std(arr[:,0]))
-plt.errorbar(range(len(model_names)), summary_list_m, summary_list_sd, 
-                 linestyle='None', marker='^')
+dirs = ["E:/model_bh_plast/" + "model"+str(i)+"-sd_"+str(sigmas[int(i)]) + 
+        "/results.npy" for i in range (4)]
+for i in range (4):
+    res = numpy.load(dirs[i]) 
+    fig = plt.figure()
+    plot_rns(res, 4.5, sigmas[i], gr = gr_list[i])
+    fig.savefig("Fig1_"+str(i))
 
 
 '''phenotypic variance costs'''
 #we now assume that either canalization or phenotypic variance incurs a cost. If 
 #phenotypic variance is ocstly, it does not matter whether the variance is due to
 #plasticity or due to diversified bet-hedging
-costs =[-0.2, 0]
+costtype = ["m","p1", "p2","e1","e2"]
+costs =[-0.15, 0.15, 0.5]
 model_list = []
-for i in range(2):
-    model_list.append(Run_Program(model_name = "costs"+ str(i)+ "mag_"+ str(costs[i]),
-        startpop = startpop, env = [4.5, 2],max_year = 2000,
-        gr = numpy.array([[3,1.25],[0,1.25]]), costs = "yes", costmag = costs[i]))
+for i in range (5):
+    for j in range(3):
+        x = Run_Program(model_name = "pvar"+ "-" + str(costtype[i])+
+            "-mag_"+ str(costs[j]),
+            startpop = startpop, env = [4.5, 2],max_year = 4000,
+            gr = numpy.array([[3,1.25],[0,1.25]]),
+            costs = "s", costtype = costtype[i], costmag = costs[j])
+        model_list.append(x)
+        x.run()
+        x.save_data()
+
+for i in range (1):
+    for j in range(3):
+        direc = "E:/model_bh_plast/" + "pvar-" + str(costtype[i]) +"-mag_" + str(
+                costs[j]) + "/results.npy"
+    
+        res = numpy.load(direc) 
+        fig = plt.figure()
+        out = plot_rns(res, 4.5, 2, gr = numpy.array([[3,1.25],[0,1.25]]))
+        fig.savefig("Fig2_"+str(i) + "-" + str(j))
+        print ("parameters: ")
+        print(out)
+    
+bh_init = Run_Program(model_name = "varcostsbh",
+        startpop = startpop, env = [4.5, 100],max_year = 100,
+        gr = numpy.array([[3,1.25],[0,1.25]]), 
+        costs = "s", costmag =-0.075,costtype = "m")
+bh_init.run()
+bhmod = Run_Program(model_name = "varcostsbh",
+        startpop = bh_init.eggs, env = [4.5, 100],max_year = 4000,
+        gr = numpy.array([[3,1.25],[0,1.25]]), 
+        costs = "s", costmag = -0.15,costtype = "m")
+
+bhmod.run()
+bhmod.save_data()
+for i in range (2):
+    for j in range(3):
+        direc = "E:/model_bh_plast/" + "pvar-" + str(costtype[i]) +"-mag_" + str(
+                costs[j]) + "/results.npy"
+    
+        res = numpy.load(direc) 
+        arr = numpy.array([Genotype(res[i].tolist()).pars() for i in range(len(res))])
+        print (numpy.mean(arr[1]))
+        print (numpy.mean(arr[2]))
+        print ("next\n")
+        
+ mean_list = [numpy.mean(results_list[:,i]) for i in range(10)]
+
+'''plasticity costs'''
+#needs rewrite
+costs =[-0.2, 0.2, 0.5]
+model_list = []
+for i in range(3):
+    model_list.append(Run_Program(model_name = "pcosts"+ str(i)+ "mag_"+ str(costs[i]),
+        startpop = startpop, env = [4.5, 2],max_year = 4000,
+        gr = numpy.array([[3,1.25],[0,1.25]]), costs = "r", costmag = costs[i]))
     model_list[i].run()
     model_list[i].save_data()
+
+dirs = ["E:/model_bh_plast/" + "pcosts"+ str(i)+ "mag_"+ str(costs[i]) + 
+        "/results.npy" for i in range (3)]    
+for i in range (3):
+    res = numpy.load(dirs[i]) 
+    fig = plt.figure()
+    plot_rns(res, 4.5, 2, gr = numpy.array([[3,1.25],[0,1.25]]))
+    fig.savefig("Fig3_"+str(i))  
     
-#-0.5: extinction in year 12
-#-0.2 extinction in 1698
-'''functions'''
-'''these things are currently not in use'''
-def plot_3d (rn):
-       f = rn[0] #mean
-       s = rn[1]+rn[2] # sum, phenotypic variance
-       r = rn[1]/(rn[1]+rn[2])#ratio of var components
-       
-       xyz = numpy.vstack([r,s,f])
-                  
-       cm = plt.get_cmap("viridis")
-       fig = plt.figure()
-       ax = fig.add_subplot(111, projection='3d')
-       ax.set_xlabel('Variance composition(r)')
-       ax.set_ylabel('Phenotypic variance(s)')
-       ax.set_zlabel('Frequency P2 (f)')
-       ax.set_xlim3d(0,0.25)
-       ax.set_ylim3d(0, 1)
-       ax.set_zlim3d(0, 10)
-       
-       try:
-           density = stats.gaussian_kde(xyz)(xyz)
-           idx = density.argsort()
-           x, y, z, density = r[idx], s[idx], f[idx], density[idx]
-           ax.scatter(x, y, z, c=density, cmap = cm)
-       except:
-           ax.scatter(r,s,f)
-       plt.show()
-        
-def plot_summary(model_array, variable = 0):
-    for i in range(len(model_array)):
-        res = model_array[i].results
-        val_y = res[variable]
-        val_n = res[variable+3]
-        plt.scatter(numpy.full(len(val_y),i), val_y, 
-                c = sum(val_n)/val_n, cmap = "Blues_r", s = 10, marker="s")
-    
-
-    def plot_over_time(self, variable=0):
-        ylist = ["Frequency P2", "Var_among", "Var_within", "Ratio", "Sum"]
-        yl =[[0,1], [0,0.25], [0,0.25], [0,1], [0, 0.25]]
-        mean = [numpy.mean(self.details_list[i][variable]) for i in range(len(
-            self.details_list))]
-        sd = [numpy.std(self.details_list[i][variable]) for i in range(len(
-            self.details_list))]
-        upper = [mean[i]+sd[i] for i in range(len(mean))]
-        lower = [mean[i]-sd[i] for i in range(len(mean))]
-        plt.rcParams['font.size']=14
-        Fig = plt.plot(mean, 'ks-', linewidth = 2.0)
-        plt.ylabel(ylist[variable], fontsize= 14)
-        plt.ylim(yl[variable])
-        plt.xlabel("Time", fontsize= 14)
-        plt.plot(upper, color = "grey", linestyle = "dashed")
-        plt.plot(lower, color = "grey", linestyle = "dashed")
-        return (Fig)
-
-
